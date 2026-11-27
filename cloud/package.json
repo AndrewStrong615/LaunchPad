@@ -1,0 +1,19 @@
+{
+  "name": "liftoff-cloud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Liftoff as a web app: bring a GitHub repo or a zip, scan it, and let Claude run the launch steps in the cloud.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "LIFTOFF_DEV_LOGIN=1 node server.mjs",
+    "setup": "node setup.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.14.0",
+    "libsodium-wrappers": "^0.8.4"
+  },
+  "license": "MIT"
+}

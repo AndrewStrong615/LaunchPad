@@ -25,6 +25,12 @@ Claude does the work itself. You only step in for things a person has to do (cre
 
 Liftoff doesn't trust its own ticks: `liftoff verify` checks the live site, DNS, the Stripe webhook, Sentry, PostHog, CI, Supabase row-level security and the shipped code for leaked keys, and unticks anything that isn't true. After launch, `/liftoff:pulse` pulls revenue, sign-ups, conversion, crashes and uptime from the accounts you already connected, and recommends one next action.
 
+## Liftoff Cloud (web app)
+
+The same thing in the browser: sign in with GitHub, add an app from a repo link or a zip, see it in Mission Control, and let Claude run the launch steps in a private cloud sandbox while you watch, answer questions and approve anything risky. Changes come back as a draft pull request (or a patch for zips). Keys stay encrypted on the server; the sandbox only sees placeholders.
+
+It lives in [`cloud/`](cloud/README.md) and reuses this plugin's code. `render.yaml` deploys it to Render.
+
 ## Install
 
 ```
@@ -114,4 +120,5 @@ The skills set these as they go. `liftoff costs` estimates monthly costs for the
 ```
 npm test
 claude --plugin-dir .   # try the plugin locally
+cd cloud && npm install && npm test && npm run dev   # the web app
 ```
