@@ -5,7 +5,6 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
-import { fileURLToPath } from 'node:url';
 import { ACCOUNTS, STEPS, accountsFor, accountsForStep, needsFor, stepsFor } from '../lib/catalog.mjs';
 import {
   CONFIG_KEYS, addDeploy, addTask, connectAccount, credentialEnv, disconnectAccount, findProject, initProject,
@@ -14,17 +13,12 @@ import {
 } from '../lib/state.mjs';
 import { startServer } from '../lib/server.mjs';
 import { applyVerify, runVerify } from '../lib/verify.mjs';
-import { storeScan, walk } from '../lib/scan.mjs';
+import { applyScan, storeScan, walk } from '../lib/scan.mjs';
 import { collectPulse, recordPulse, revenueOf } from '../lib/pulse.mjs';
 import { nextAction } from '../lib/advice.mjs';
 import { costReport } from '../lib/costs.mjs';
+import { renderScaffold } from '../lib/scaffold.mjs';
 
-const TEMPLATES = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'templates');
-const SCAFFOLDS = {
-  'money-test': [['money-path.spec.ts', 'e2e/liftoff-money-path.spec.ts'], ['playwright.liftoff.config.ts', 'playwright.liftoff.config.ts']],
-  'money-test-mobile': [['money-path.maestro.yaml', '.maestro/liftoff-money-path.yaml']],
-  uptime: [['uptime.yml', '.github/workflows/liftoff-uptime.yml']],
-};
 
 const HELP = `liftoff: launch your app and track it in Mission Control
 
@@ -231,12 +225,7 @@ async function main() {
     case 'scan': {
       const s = loadState(dirOf(flags));
       const findings = storeScan(s.root, s);
-      for (const f of findings) {
-        if (!s.checklist[f.id]) continue;
-        s.checklist[f.id].verify = { ok: f.ok, detail: f.detail, at: new Date().toISOString() };
-        if (f.ok) Object.assign(s.checklist[f.id], { done: true, by: 'verified', at: new Date().toISOString() });
-        else Object.assign(s.checklist[f.id], { done: false, by: null, at: null });
-      }
+      applyScan(s, findings);
       saveState(s);
       if (flags.json) return out(JSON.stringify(findings, null, 2));
       for (const f of findings) out(`  ${f.ok ? '✓' : '✗'} ${f.id.padEnd(18)} ${f.detail}`);
@@ -265,20 +254,16 @@ async function main() {
       return out(r.note);
     }
     case 'scaffold': {
-      const kind = args[0];
-      const files = SCAFFOLDS[kind];
-      if (!files) throw new Error(`Scaffold one of: ${Object.keys(SCAFFOLDS).join(', ')}`);
       const s = loadState(dirOf(flags));
-      for (const [from, to] of files) {
-        const dest = path.join(s.root, to);
+      for (const file of renderScaffold(args[0], s)) {
+        const dest = path.join(s.root, file.path);
         if (fs.existsSync(dest) && !flags.force) {
-          out(`  – ${to} exists (use --force to replace)`);
+          out(`  – ${file.path} exists (use --force to replace)`);
           continue;
         }
         fs.mkdirSync(path.dirname(dest), { recursive: true });
-        const body = fs.readFileSync(path.join(TEMPLATES, from), 'utf8').replaceAll('{{APP_NAME}}', s.name).replaceAll('{{HEALTH_PATH}}', s.config?.['health.path'] || '/api/health');
-        fs.writeFileSync(dest, body);
-        out(`  ✓ wrote ${to}`);
+        fs.writeFileSync(dest, file.content);
+        out(`  ✓ wrote ${file.path}`);
       }
       return;
     }
