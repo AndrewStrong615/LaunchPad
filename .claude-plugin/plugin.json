@@ -1,7 +1,7 @@
 {
   "name": "liftoff",
   "version": "0.2.0",
-  "description": "Launch your app from one command: database, sign-in, payments, paywalls, hosting, email, analytics, crash reports, CI/CD, a purchase flow test, uptime alerts, beta builds, a landing page and the store listing, verified against the real services, plus Mission Control and live numbers after launch.",
+  "description": "Launch your app from one command: database, sign-in, payments, paywalls, hosting, email, analytics, crash reports, CI/CD, a purchase flow test, uptime alerts, beta builds, a landing page and the store listing, verified against the real services, plus a Flight Board and live numbers after launch.",
   "author": { "name": "AndrewStrong615" },
   "keywords": ["launch", "deploy", "stripe", "revenuecat", "vercel", "posthog", "sentry", "testflight"]
 }

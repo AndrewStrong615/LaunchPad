@@ -1,6 +1,6 @@
-// Mission Control front end, shared by the local dashboard (lib/server.mjs)
+// Flight Board front end, shared by the local dashboard (lib/server.mjs)
 // and Liftoff Cloud (cloud/). A host page adds views and controls with
-// MC.configure({ ...hooks }) and then calls MC.start(); the local page has no
+// Board.configure({ ...hooks }) and then calls Board.start(); the local page has no
 // hooks and starts on its own.
 const state = { apps: [], accounts: [], view: 'overview', selected: null, open: {}, lastSync: null };
 const HOOKS = {};
@@ -120,7 +120,7 @@ function renderNav() {
 }
 
 function renderTopbar(app) {
-  const crumbs = [h('button', { class: 'crumb', onclick: () => go('overview') }, 'Mission Control')];
+  const crumbs = [h('button', { class: 'crumb', onclick: () => go('overview') }, HOOKS.brand || 'Flight Board')];
   const extra = HOOKS.views?.[state.view];
   if (state.view === 'app' && app) crumbs.push(h('span', {}, '/'), h('b', {}, app.name));
   else if (extra) crumbs.push(h('span', {}, '/'), h('b', {}, extra.title));
@@ -139,7 +139,7 @@ function renderOverview() {
     return h('div', { class: 'card empty' },
       h('div', { class: 'tile' }, icon('rocket')),
       h('h2', {}, 'No apps yet'),
-      h('p', {}, 'Open an app in Claude Code and run ', h('code', {}, '/liftoff:onboard'), '. It shows up here right away.'));
+      h('p', {}, 'Open an app in Claude Code and run ', h('code', {}, '/liftoff:launch'), '. It shows up here right away.'));
   }
   const apps = state.apps;
   const live = apps.filter((a) => a.liveUrl).length;
@@ -157,11 +157,11 @@ function renderOverview() {
       stat('Live', live, `/ ${apps.length}`, live === apps.length ? 'Every app is live' : `${apps.length - live} not live yet`),
       stat('Blocking release', blocking, '', blocking ? 'Clear these before you ship' : 'Nothing blocking', blocking > 0),
       stat('Your open tasks', open, '', `across ${plural(apps.filter((a) => a.openTasks).length, 'app')}`),
-      stat('Accounts connected', connected, `/ ${state.accounts.length}`, 'Reused by every app')),
+      stat('Accounts connected', connected, `/ ${state.accounts.length}`, 'Shared by all your apps')),
     h('div', { class: 'cols' },
       h('section', { class: 'card' },
         h('div', { class: 'card-head' }, h('h2', {}, 'Needs you'), h('span', { class: 'count' }, allTasks.length),
-          h('span', { class: 'end sub' }, 'Release blockers first')),
+          h('span', { class: 'end sub' }, 'Blockers on top')),
         h('div', { class: 'card-body rows' },
           allTasks.length ? allTasks.map((t) => taskRow(t.app, t, true)) : h('div', { class: 'empty-row' }, icon('checkCircle'), 'Nothing waiting on you.'))),
       h('section', { class: 'card' },
@@ -193,7 +193,7 @@ function appCard(a) {
       h('div', { style: { marginTop: '6px' } }, meter(a))),
     h('div', { class: 'bottom' },
       a.blockingTasks ? h('span', { class: 'flag' }, icon('flag'), `${a.blockingTasks} blocking`) : h('span', {}, a.readyForRelease ? 'Nothing blocking' : 'No blockers'),
-      h('span', {}, `${toDo(a)} to do`),
+      h('span', {}, `${toDo(a)} left`),
       h('span', { class: 'go' }, 'Open', icon('arrow'))));
 }
 
@@ -229,7 +229,7 @@ function renderAccounts() {
   return [
     h('div', { class: 'page-head' }, h('div', {},
       h('h1', {}, 'Accounts'),
-      h('p', {}, hook('accountsIntro') || ['Connected once on this machine and reused by every app. Keys stay in ', h('code', {}, '~/.liftoff/credentials.env'), '.']))),
+      h('p', {}, hook('accountsIntro') || ['Add a key once and every app on this machine can use it. Keys stay in your OS keychain (or ', h('code', {}, '~/.liftoff/credentials.env'), '), never in a repo.']))),
     h('div', { class: 'cols' },
       h('section', { class: 'card' },
         h('div', { class: 'card-head' }, h('h2', {}, 'Not connected'), h('span', { class: 'count' }, rest.length),
@@ -349,7 +349,7 @@ function renderApp(app) {
 
     h('section', { class: 'card' },
       h('div', { class: 'card-head' }, h('h2', {}, 'Launch steps'), h('span', { class: 'count' }, `${app.stepsDone}/${app.stepsTotal}`),
-        h('span', { class: 'end' }, hook('stepsHeadEnd', app) || h('span', { class: 'sub' }, 'Claude runs these during onboarding'))),
+        h('span', { class: 'end' }, hook('stepsHeadEnd', app) || h('span', { class: 'sub' }, 'Claude works through these in order'))),
       h('div', { class: 'roadmap' }, app.steps.map((s) => {
         const st = s.status || 'todo';
         return h('div', { class: 'step ' + st, title: s.note || STEP_WORD[st] },
@@ -362,8 +362,8 @@ function renderApp(app) {
     h('div', { class: 'cols' },
       h('div', { class: 'stack' },
         h('section', { class: 'card' },
-          h('div', { class: 'card-head' }, h('h2', {}, 'Your tasks'), h('span', { class: 'count' }, app.openTasks),
-            h('span', { class: 'end sub' }, 'Release blockers first')),
+          h('div', { class: 'card-head' }, h('h2', {}, 'Needs you'), h('span', { class: 'count' }, app.openTasks),
+            h('span', { class: 'end sub' }, 'Blockers on top')),
           h('div', { class: 'card-body' },
             h('div', { class: 'rows' }, app.tasks.length ? app.tasks.map((t) => taskRow(app, t)) : h('div', { class: 'empty-row' }, icon('checkCircle'), 'Nothing waiting on you.')),
             h('form', { class: 'add', onsubmit: (e) => {
@@ -404,7 +404,7 @@ function renderApp(app) {
             app.deploys.length ? h('div', { class: 'rows' }, app.deploys.map((d) => h('div', { class: 'deploy' },
               h('span', { class: 'tile' }, icon(d.platform === 'web' ? 'globe' : 'phone')),
               h('div', { class: 'grow' }, h('div', { style: { fontWeight: 500 } }, d.target),
-                h('div', { class: 'small' }, d.platform === 'web' ? 'Web' : `${PLATFORM[d.platform] || d.platform} · to your testers`, d.at ? ` · ${ago(d.at)}` : '')),
+                h('div', { class: 'small' }, d.platform === 'web' ? 'Web' : `${PLATFORM[d.platform] || d.platform} beta`, d.at ? ` · ${ago(d.at)}` : '')),
               h('div', { style: { textAlign: 'right' } },
                 h('span', { class: 'pill sm ' + (d.status === 'live' ? 'good' : d.status === 'failed' ? 'bad' : 'run') }, h('span', { class: 'd' }), d.status === 'live' ? 'Live' : d.status),
                 d.version ? h('div', { class: 'v', style: { marginTop: '3px' } }, d.version) : null))))
@@ -429,7 +429,7 @@ function render() {
   const extra = HOOKS.views?.[state.view];
   const view = state.view === 'app' ? renderApp(app) : extra ? extra.render() : state.view === 'accounts' ? renderAccounts() : renderOverview();
   $('main').replaceChildren(...[view].flat(Infinity).filter(Boolean));
-  const brand = HOOKS.brand || 'Mission Control';
+  const brand = HOOKS.brand || 'Flight Board';
   document.title = state.view === 'app' ? `${app.name} · ${brand}` : extra ? `${extra.title} · ${brand}` : brand;
   hook('afterRender');
 }
@@ -503,5 +503,5 @@ function start() {
   setTimeout(tick, hook('pollMs') || 4000);
 }
 
-window.MC = { configure, start, state, h, icon, api, mutate, go, render, refresh, toast, copy, ago, colorFor, avatar, host, plural, money, PLATFORM, STEP_WORD, ICONS };
-if (!document.body.hasAttribute('data-mc-manual')) start();
+window.Board = { configure, start, state, h, icon, api, mutate, go, render, refresh, toast, copy, ago, colorFor, avatar, host, plural, money, PLATFORM, STEP_WORD, ICONS };
+if (!document.body.hasAttribute('data-board-manual')) start();

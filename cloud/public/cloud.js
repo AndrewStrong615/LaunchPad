@@ -1,11 +1,11 @@
-// Liftoff Cloud screens on top of the shared Mission Control front end
-// (mission-control.js): adding apps, connecting accounts, and runs where
+// Liftoff Cloud screens on top of the shared Flight Board front end
+// (board.js): adding apps, connecting accounts, and runs where
 // Claude does the launch steps in the cloud.
 (() => {
-  const MC = window.MC;
-  const { h, icon, api, go, render, refresh, toast, state, ago } = MC;
+  const Board = window.Board;
+  const { h, icon, api, go, render, refresh, toast, state, ago } = Board;
 
-  Object.assign(MC.ICONS, {
+  Object.assign(Board.ICONS, {
     terminal: '<path d="m5 7 5 5-5 5M12 19h7"/>',
     upload: '<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>',
     github: '<path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/>',
@@ -315,7 +315,7 @@
           const done = ['done', 'skipped'].includes(s.status);
           return h('label', { class: 'pick' + (done && !C.pick[s.id] ? ' off' : '') },
             h('input', { type: 'checkbox', checked: !!C.pick[s.id], onchange: (e) => { C.pick[s.id] = e.target.checked; render(); } }),
-            h('span', { class: 't' }, h('b', {}, s.label), h('span', { class: 'small' }, done ? MC.STEP_WORD[s.status] : s.waitingOn?.length ? `Waits on ${s.waitingOn.map((id) => steps.find((x) => x.id === id)?.label || id).join(', ')}` : s.note || 'Not started')));
+            h('span', { class: 't' }, h('b', {}, s.label), h('span', { class: 'small' }, done ? Board.STEP_WORD[s.status] : s.waitingOn?.length ? `Waits on ${s.waitingOn.map((id) => steps.find((x) => x.id === id)?.label || id).join(', ')}` : s.note || 'Not started')));
         })),
         modelField,
         h('label', { class: 'field' }, h('span', {}, 'Note for Claude ', h('span', { class: 'hint' }, '(optional)')), note),
@@ -389,13 +389,13 @@
     if (!app) return h('div', { class: 'card empty' }, h('h2', {}, 'Pick an app'), h('p', {}, 'Open an app and choose Run with Claude.'));
     const run = C.run;
     const head = h('div', { class: 'page-head' }, h('div', { style: { minWidth: 0, flex: 1 } },
-      h('div', { class: 'run-head' }, MC.avatar(app, true), h('h1', {}, app.name), run ? runPill(run.status) : null,
+      h('div', { class: 'run-head' }, Board.avatar(app, true), h('h1', {}, app.name), run ? runPill(run.status) : null,
         h('span', { class: 'end' },
           run && LIVE.has(run.status) ? h('button', { class: 'btn', onclick: (e) => busy(e.currentTarget, async () => { C.run = await post(`/api/apps/${C.slug}/runs/${run.id}/stop`); render(); }) }, icon('stop'), 'Stop') : null,
           run && !OPEN.has(run.status) && run.model !== STRONGEST && models().some((m) => m.id === STRONGEST) && C.me?.claude.ok
             ? h('button', { class: 'btn', title: 'Start a new run for the same steps on Claude Opus 5.5', onclick: (e) => busy(e.currentTarget, () => startRun(C.slug, { steps: run.steps, note: run.note || '', model: STRONGEST })) }, icon('sparkle'), 'Try again with Opus') : null,
           run && !OPEN.has(run.status) ? h('button', { class: 'btn', onclick: () => { C.runId = null; C.run = null; C.pick = {}; remember(); render(); } }, icon('plus'), 'New run') : null,
-          h('button', { class: 'btn quiet', onclick: () => go('app', app.slug) }, 'Mission Control', icon('arrow')))),
+          h('button', { class: 'btn quiet', onclick: () => go('app', app.slug) }, `Back to ${app.name}`, icon('arrow')))),
       run ? h('div', { class: 'run-meta', style: { marginTop: '8px' } },
         h('span', {}, `Started ${ago(run.createdAt)}`),
         run.model ? h('span', {}, modelLabel(run.model)) : null,
@@ -458,7 +458,7 @@
 
   // ---------- hooks ----------
 
-  MC.configure({
+  Board.configure({
     brand: 'Liftoff Cloud',
     unauthorized: () => { location.href = '/login'; },
     pollMs: () => (state.view === 'run' && C.run && LIVE.has(C.run.status) ? 2000 : 4000),
@@ -489,10 +489,10 @@
         h('p', {}, 'Add your app to see what stands between it and real users. Then let Claude set it up, step by step, in the cloud.'))),
       addForms(),
     ],
-    overviewIntro: (apps) => `${MC.plural(apps.length, 'app')} in Liftoff Cloud. Here is what needs you first.`,
+    overviewIntro: (apps) => `${Board.plural(apps.length, 'app')} in Liftoff Cloud. Here is what needs you first.`,
     overviewActions: () => h('button', { class: 'btn primary', onclick: () => go('add') }, icon('plus'), 'Add an app'),
     accountAction,
-    accountsIntro: () => 'Connected once and reused by every app. Keys are encrypted on the server, and Claude’s sandbox only sees placeholders that turn into the real key on the way to that service.',
+    accountsIntro: () => 'Add a key once and all your apps can use it. Keys are encrypted on the server, and Claude’s sandbox only sees placeholders that turn into the real key on the way to that service.',
     heroMeta: sourceLine,
     heroActions: (app) => [
       h('button', { class: 'btn', title: 'Fetch the code again and rescan it', onclick: (e) => busy(e.currentTarget, async () => { toast('Rescanning…'); await post(`/api/apps/${app.slug}/rescan`); await refresh(true); toast('Rescanned'); }) }, icon('refresh'), 'Rescan'),
@@ -513,5 +513,5 @@
     },
   });
 
-  MC.start();
+  Board.start();
 })();

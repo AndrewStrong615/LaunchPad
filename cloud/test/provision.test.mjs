@@ -73,7 +73,7 @@ test('the agent keeps keys out of reach and asks before risky steps', () => {
   assert.ok(!env.config.networking.allowed_hosts.includes('*'));
 
   const text = kickoff({
-    state: { name: 'Fernweh', framework: 'Expo', platforms: ['ios', 'web'], source: { fullName: 'acme/fernweh', ref: 'main' } },
+    state: { name: 'Greenrow', framework: 'Expo', platforms: ['ios', 'web'], source: { fullName: 'acme/greenrow', ref: 'main' } },
     steps: ['hosting'],
     mode: 'github',
     branch: 'liftoff/launch-1',

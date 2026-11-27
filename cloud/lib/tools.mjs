@@ -99,7 +99,7 @@ function checklistView(state) {
   });
 }
 
-// Server-side verify (and the Mission Control Verify button).
+// Server-side verify (and the Flight Board's Verify button).
 export async function verifyApp(ctx, uid, slug, only = null) {
   const snap = ctx.store.loadApp(uid, slug);
   if (!snap) throw new HttpError(404, 'No such app');

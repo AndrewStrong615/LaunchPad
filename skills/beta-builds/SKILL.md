@@ -1,6 +1,6 @@
 ---
 name: beta-builds
-description: Ship iOS builds to TestFlight and Android builds to a Play testing track (or Firebase App Distribution). Used by the TestFlight and Play testing launch steps.
+description: Ship iOS builds to TestFlight and Android builds to a Play testing track (or Firebase App Distribution). Used by the TestFlight beta and Play test track launch steps.
 ---
 
 # Beta builds
@@ -12,7 +12,7 @@ Requires the Apple Developer account (App Store Connect API key stored as `APP_S
 3. Add internal testers (the user) to a TestFlight group.
 4. `liftoff deploy --target testflight --platform ios --version "1.0 (1)" --status live`
 
-## Android → Play testing
+## Android → Play test track
 Requires the Google Play service account JSON (`GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`).
 1. The first upload of a new app must be done by hand in Play Console: if this is a new app, build the AAB, then add a blocking task "Upload the first AAB to the internal testing track in Play Console" with the file path.
 2. After that: `liftoff exec --only expo,google-play -- eas submit --platform android` or `fastlane supply --track internal`.

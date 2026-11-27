@@ -1,7 +1,7 @@
 {
   "name": "liftoff",
   "version": "0.2.0",
-  "description": "Claude Code plugin that launches your app and tracks it in a local Mission Control dashboard.",
+  "description": "Claude Code plugin that launches your app and follows it on a local Flight Board dashboard.",
   "type": "module",
   "bin": { "liftoff": "bin/liftoff.mjs" },
   "scripts": {

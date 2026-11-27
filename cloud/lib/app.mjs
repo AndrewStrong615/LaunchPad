@@ -1,5 +1,5 @@
 // Liftoff Cloud's HTTP routes: sign-in, the web app's pages, and the JSON API
-// the shared Mission Control front end and the cloud screens call.
+// the shared Flight Board front end and the cloud screens call.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -51,7 +51,7 @@ export function createApp(ctx) {
 
   const accountsOf = (uid) => listUserAccounts(store, uid);
 
-  // Everything Mission Control shows for one app, plus what the cloud adds.
+  // Everything the Flight Board shows for one app, plus what the cloud adds.
   function view(uid, state, accounts = accountsOf(uid)) {
     const s = summarize(state, { accounts });
     const all = runs.list(uid, state.slug);

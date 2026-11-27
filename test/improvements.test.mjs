@@ -56,9 +56,9 @@ before(() => {
     'package.json': { name: 'ledger', dependencies: { next: '15', react: '19', stripe: '17', '@supabase/supabase-js': '2' } },
     'app/page.tsx': 'export default function Home() { return null }',
   });
-  expo = makeApp('fernweh', {
-    'package.json': { name: 'fernweh', dependencies: { expo: '52', 'react-native': '0.76', 'expo-camera': '16', '@supabase/supabase-js': '2' } },
-    'app.json': { expo: { name: 'Fernweh', ios: { infoPlist: { NSCameraUsageDescription: 'Camera' } } } },
+  expo = makeApp('greenrow', {
+    'package.json': { name: 'greenrow', dependencies: { expo: '52', 'react-native': '0.76', 'expo-camera': '16', '@supabase/supabase-js': '2' } },
+    'app.json': { expo: { name: 'Greenrow', ios: { infoPlist: { NSCameraUsageDescription: 'Camera' } } } },
     'src/pay.ts': "const url = 'https://checkout.stripe.com/c/pay/abc'",
   });
 });
@@ -199,9 +199,9 @@ test('store scan catches vague purpose strings, export compliance, Stripe links 
   assert.equal(f['iap-links'].ok, false);
   assert.equal(f['ios-delete'].ok, false);
 
-  const good = makeApp('fernweh-good', {
-    'package.json': { name: 'fernweh-good', dependencies: { expo: '52', 'expo-camera': '16' } },
-    'app.json': { expo: { name: 'Good', plugins: [['expo-camera', { cameraPermission: 'Fernweh uses the camera to scan your boarding pass.' }]], ios: { config: { usesNonExemptEncryption: false } } } },
+  const good = makeApp('greenrow-good', {
+    'package.json': { name: 'greenrow-good', dependencies: { expo: '52', 'expo-camera': '16' } },
+    'app.json': { expo: { name: 'Good', plugins: [['expo-camera', { cameraPermission: 'Greenrow uses the camera to scan your boarding pass.' }]], ios: { config: { usesNonExemptEncryption: false } } } },
     'store/ios/review-notes.md': 'Demo login: review@example.com / password hunter2',
   });
   const g = Object.fromEntries(storeScan(good, detectProject(good)).map((x) => [x.id, x]));
@@ -330,7 +330,7 @@ test('detects monorepos, Capacitor, existing auth and payments, and the package 
 
 for (const [name, expect] of Object.entries({
   'next-saas': { framework: 'Next.js', platforms: ['web'], steps: ['hosting', 'payments', 'money-test'], noSteps: ['testflight'] },
-  'expo-habits': { framework: 'Expo', platforms: ['android', 'ios'], steps: ['testflight', 'play-testing', 'store-listing'], noSteps: ['hosting'] },
+  'expo-recipes': { framework: 'Expo', platforms: ['android', 'ios'], steps: ['testflight', 'play-testing', 'store-listing'], noSteps: ['hosting'] },
   'flutter-notes': { framework: 'Flutter', platforms: ['android', 'ios'], steps: ['store-checks'], noSteps: ['hosting'] },
 })) {
   test(`fixture ${name}: detected, planned in a valid order, scans run`, () => {
@@ -376,7 +376,7 @@ test('CLI: set, settings, next, costs and undo', () => {
   assert.match(run('status'), /Next: /);
 });
 
-test('Mission Control API includes the next action and costs', async () => {
+test('Flight Board API includes the next action and costs', async () => {
   const { server, url: u } = await startServer({ port: 0 });
   // Node 18's fetch doesn't fall back from ::1 to 127.0.0.1 for "localhost".
   const url = u.replace('localhost', '127.0.0.1');

@@ -8,7 +8,7 @@ description: Build a landing page for the app with a clear headline, screenshots
 Write the page from what the app actually does, in the app's own visual style (its colours, fonts, icon). Don't use a generic template look.
 
 Sections:
-1. Hero: short headline in the user's voice ("Your habits, finally kept."), one-line subhead, primary button (App Store / Google Play badges for mobile, "Get started" for web), a device screenshot or mockup.
+1. Hero: short headline in the user's voice ("Plan the whole season in one evening."), one-line subhead, primary button (App Store / Google Play badges for mobile, "Get started" for web), a device screenshot or mockup.
 2. Three features, each with a screenshot.
 3. Pricing (free vs Pro, matching the payments step).
 4. FAQ (3–5).

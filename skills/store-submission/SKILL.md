@@ -15,7 +15,7 @@ Show the user the name, subtitle and keywords before uploading. Count characters
 
 ## 2. Screenshots
 - Capture from the simulator/emulator on the core screens with realistic sample data (never lorem ipsum): iPhone 6.9" (1320×2868) and 6.5" (1284×2778); Android phone (1080×1920 or larger).
-- Add a short caption above each (benefit, not feature: "Plan a trip in a minute"), in the app's colours. Generate the framed images with a script (HTML + Playwright screenshot works well), into `store/ios/screenshots/en-US/` and `store/android/metadata/android/en-US/images/phoneScreenshots/`.
+- Add a short caption above each (benefit, not feature: "See every bed at a glance"), in the app's colours. Generate the framed images with a script (HTML + Playwright screenshot works well), into `store/ios/screenshots/en-US/` and `store/android/metadata/android/en-US/images/phoneScreenshots/`.
 - First two screenshots carry most of the conversion: put the core action and the result first.
 
 ## 3. Upload metadata (not submit)

@@ -1,9 +1,9 @@
 ---
 name: hosting
-description: Deploy a web app to production on Vercel (default) or Cloudflare, with environment variables, preview deploys and a custom domain. Used by the hosting launch step.
+description: Deploy a web app to production on Vercel (default) or Cloudflare, with environment variables, preview deploys and a custom domain. Used by the deploy and domain launch step.
 ---
 
-# Hosting + domain
+# Deploy and domain
 
 ## Pick the host
 - `wrangler.toml` present, or the user prefers Cloudflare → Cloudflare Pages/Workers.

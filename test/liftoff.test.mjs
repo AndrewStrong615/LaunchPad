@@ -33,9 +33,9 @@ before(() => {
     'app/terms/page.tsx': '',
     '.github/workflows/ci.yml': 'on: push',
   });
-  expo = makeApp('fernweh', {
-    'package.json': { name: 'fernweh', dependencies: { expo: '52', 'react-native': '0.76', '@sentry/react-native': '6' } },
-    'app.json': { expo: { name: 'Fernweh' } },
+  expo = makeApp('greenrow', {
+    'package.json': { name: 'greenrow', dependencies: { expo: '52', 'react-native': '0.76', '@sentry/react-native': '6' } },
+    'app.json': { expo: { name: 'Greenrow' } },
   });
 });
 
@@ -52,7 +52,7 @@ test('detects an Expo app as iOS + Android with its display name', () => {
   const d = detectProject(expo);
   assert.equal(d.framework, 'Expo');
   assert.deepEqual(d.platforms, ['android', 'ios']);
-  assert.equal(d.name, 'Fernweh');
+  assert.equal(d.name, 'Greenrow');
   assert.equal(d.integrations.sentry, true);
 });
 
@@ -126,25 +126,25 @@ test('CLI: step, task, check, deploy and status', () => {
   run('step', 'testflight', 'done', '--provider', 'eas', '--force');
   run('task', 'add', 'Create app in App Store Connect', '--blocks');
   run('check', 'ios-delete');
-  run('deploy', '--target', 'testflight', '--platform', 'ios', '--version', '1.4 (12)');
+  run('deploy', '--target', 'testflight', '--platform', 'ios', '--version', '2.3 (41)');
   const s = JSON.parse(run('status', '--json'));
   assert.equal(s.steps.find((x) => x.id === 'testflight').status, 'done');
   assert.equal(s.tasks.filter((t) => !t.key && t.blocksRelease).length, 1);
   assert.equal(s.checklist.find((c) => c.id === 'ios-delete').done, true);
-  assert.equal(s.deploys[0].version, '1.4 (12)');
-  assert.match(run('status'), /Fernweh/);
+  assert.equal(s.deploys[0].version, '2.3 (41)');
+  assert.match(run('status'), /Greenrow/);
 });
 
-test('Mission Control API lists apps and edits tasks and checks', async () => {
+test('Flight Board API lists apps and edits tasks and checks', async () => {
   const { server, url: u } = await startServer({ port: 0 });
   // Node 18's fetch doesn't fall back from ::1 to 127.0.0.1 for "localhost".
   const url = u.replace('localhost', '127.0.0.1');
   try {
     const apps = await (await fetch(`${url}/api/apps`)).json();
-    assert.deepEqual(apps.map((a) => a.slug).sort(), ['fernweh', 'ledger']);
+    assert.deepEqual(apps.map((a) => a.slug).sort(), ['greenrow', 'ledger']);
 
     const html = await (await fetch(url)).text();
-    assert.match(html, /Mission Control/);
+    assert.match(html, /Flight Board/);
 
     const post = (p, body) => fetch(`${url}${p}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     let res = await post('/api/apps/ledger/tasks', { title: 'Pick a domain', blocksRelease: true });

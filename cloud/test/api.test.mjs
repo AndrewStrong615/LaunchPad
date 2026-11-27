@@ -86,9 +86,9 @@ test('sign-in, origin checks and the plain API', async (t) => {
   assert.equal(r.body.github.oauth, false);
 
   // Shared assets are served.
-  r = await fetch(`${srv.base}/mission-control.js`);
+  r = await fetch(`${srv.base}/board.js`);
   assert.equal(r.status, 200);
-  assert.match(await r.text(), /window\.MC/);
+  assert.match(await r.text(), /window\.Board/);
 
   // Import a zip.
   const zip = zipDirectory(path.join(FIXTURES, 'next-saas'), { prefix: 'next-saas/' });
@@ -227,7 +227,7 @@ test('a cloud run: Claude calls Liftoff tools, asks for approval and a choice, a
     s.verify = await tools.custom('liftoff_verify', { only: ['host-deploy', 'land-page'] });
     s.pr = await tools.custom('open_pull_request', { branch: 'x', title: 't', body: 'b' });
     s.outputs = [{ id: 'file_out1', filename: 'liftoff-changes.patch', size_bytes: 5, body: 'patch' }];
-    tools.emit({ type: 'agent.message', content: [{ type: 'text', text: '✓ Hosting + domain: Vercel, live' }] });
+    tools.emit({ type: 'agent.message', content: [{ type: 'text', text: '✓ Deploy and domain: Vercel, live' }] });
     tools.end('250');
   });
   const srv = await startTest({ anthropic: client });
@@ -288,10 +288,10 @@ test('a cloud run: Claude calls Liftoff tools, asks for approval and a choice, a
   assert.equal(session.badSetting.isError, true);
   assert.match(session.verify.text, /PASS host-deploy/);
   assert.equal(session.pr.isError, true); // uploads have no pull request
-  assert.ok(run.events.some((e) => e.kind === 'message' && /Hosting/.test(e.text)));
+  assert.ok(run.events.some((e) => e.kind === 'message' && /Deploy and domain/.test(e.text)));
   assert.ok(run.events.some((e) => e.kind === 'you' && e.text === 'invoicely.app'));
 
-  // Mission Control shows what the run did.
+  // The Flight Board shows what the run did.
   r = await me.get('/api/apps/invoicely');
   const hosting = r.body.steps.find((s) => s.id === 'hosting');
   assert.equal(hosting.status, 'done');
