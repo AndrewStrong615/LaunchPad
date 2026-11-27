@@ -27,6 +27,14 @@ class Queue {
   }
 }
 
+// Money is an integer string of cents, like the real API ("1500" is $15.00).
+function checkMoney(m) {
+  if (!m || !/^(0|[1-9]\d*)$/.test(String(m.amount)) || m.currency !== 'USD') {
+    throw Object.assign(new Error(`invalid amount ${JSON.stringify(m)}: use cents as an integer string`), { status: 400, headers: {} });
+  }
+  return m;
+}
+
 export function fakeAnthropic(scenario = async () => {}) {
   const sessions = new Map();
   const calls = [];
@@ -64,6 +72,7 @@ export function fakeAnthropic(scenario = async () => {}) {
       sessions: {
         async create(params) {
           calls.push(['sessions.create', params]);
+          if (params.budget) checkMoney(params.budget.max_list_cost);
           const s = { id: id('sesn'), params, events: [], streams: new Set(), waiters: [], consumed: new Set(), budget: params.budget };
           sessions.set(s.id, s);
           for (const ev of params.initial_events || []) emit(s, ev);
@@ -87,10 +96,19 @@ export function fakeAnthropic(scenario = async () => {}) {
               return res.result;
             },
             waitFor: (pred, timeout) => waitFor(s, pred, timeout),
-            end: (cost = '1.25') => {
-              emit(s, { type: 'session.usage', list_cost: { amount: cost, currency: 'USD' } });
+            // Finish the turn. The cost (in cents) is on the session, not in an event.
+            end: (cents = '125') => {
+              s.cost = cents;
               emit(s, { type: 'session.status_idle', stop_reason: { type: 'end_turn' } });
             },
+          };
+          // Spend reaches the budget: pause until the server raises it.
+          tools.budget = async (cents) => {
+            s.cost = cents;
+            emit(s, { type: 'session.usage', usage: { list_cost: { amount: cents, currency: 'USD' } }, budget: s.budget });
+            emit(s, { type: 'session.status_idle', stop_reason: { type: 'budget_reached' } });
+            await waitFor(s, (e) => e.type === 'session.updated');
+            emit(s, { type: 'session.status_running' });
           };
           s.done = Promise.resolve()
             .then(() => emit(s, { type: 'session.status_running' }))
@@ -100,8 +118,14 @@ export function fakeAnthropic(scenario = async () => {}) {
             });
           return { id: s.id, status: 'running' };
         },
+        async retrieve(sid) {
+          const s = sessions.get(sid);
+          if (!s) throw Object.assign(new Error('not found'), { status: 404, headers: {} });
+          return { id: sid, status: 'idle', budget: s.budget, usage: s.cost == null ? {} : { list_cost: { amount: s.cost, currency: 'USD' } } };
+        },
         async update(sid, params) {
           calls.push(['sessions.update', sid, params]);
+          if (params.budget) checkMoney(params.budget.max_list_cost);
           const s = sessions.get(sid);
           s.budget = params.budget;
           emit(s, { type: 'session.updated', budget: params.budget });
