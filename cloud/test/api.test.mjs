@@ -490,3 +490,26 @@ test('a run that reaches its budget pauses, and continues when the user adds mor
   run = await until(async () => { const x = (await me.get(url)).body; return x.status === 'finished' && x.cost === 18.4 && x; });
   assert.equal(run.budgetUsd, 25.03);
 });
+
+test('a message sent while Claude works shows once, even when the session echoes it right back', async (t) => {
+  const client = fakeAnthropic(async (s, tools) => {
+    await tools.waitFor((e) => e.type === 'user.message'); // the launch brief
+    tools.emit({ type: 'agent.message', content: [{ type: 'text', text: 'Which host?' }] });
+    await tools.waitFor((e) => e.type === 'user.message');
+    tools.emit({ type: 'agent.message', content: [{ type: 'text', text: 'Vercel it is' }] });
+    tools.end('100');
+  });
+  const srv = await startTest({ anthropic: client });
+  t.after(() => srv.stop());
+  const me = await signIn(srv.base);
+  const zip = zipDirectory(path.join(FIXTURES, 'next-saas'));
+  await me.call('POST', '/api/import/zip?name=a.zip', zip, { 'content-type': 'application/zip' });
+  let r = await me.post('/api/apps/invoicely/runs', { steps: ['hosting'] });
+  assert.equal(r.status, 200, r.text);
+  const url = `/api/apps/invoicely/runs/${r.body.id}`;
+  await until(async () => (await me.get(url)).body.events.some((e) => e.text === 'Which host?'));
+  r = await me.post(`${url}/message`, { text: 'Use Vercel' });
+  assert.equal(r.status, 200, r.text);
+  const run = await until(async () => { const x = (await me.get(url)).body; return x.status === 'finished' && x; });
+  assert.equal(run.events.filter((e) => e.kind === 'you' && e.text === 'Use Vercel').length, 1);
+});
