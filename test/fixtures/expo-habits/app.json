@@ -1,0 +1,1 @@
+{ "expo": { "name": "Streaky", "slug": "streaky", "ios": { "bundleIdentifier": "com.example.streaky" }, "android": { "package": "com.example.streaky" } } }

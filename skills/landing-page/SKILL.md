@@ -12,7 +12,8 @@ Sections:
 2. Three features, each with a screenshot.
 3. Pricing (free vs Pro, matching the payments step).
 4. FAQ (3–5).
-5. Footer: support email, privacy policy, terms.
+5. Email capture: a "get updates" or waitlist form (Supabase table or Resend audience) with a consent line. Tick `land-capture`.
+6. Footer: support email, privacy policy, terms.
 
 Placement:
 - Web app: the marketing route of the same app (`/` for logged-out users), or `/landing`.
@@ -20,4 +21,6 @@ Placement:
 
 Also create `/privacy` and `/terms` pages (plain, honest: list the services actually used, e.g. Stripe, PostHog, Sentry, Supabase; add an account deletion section). These URLs are needed for the store listings. Add Open Graph / Twitter meta tags and an `og-image` (generate a 1200×630 image from the hero). Add PostHog pageview tracking if analytics is set up.
 
-Record: `liftoff step landing done --note "<url>"`, tick `land-page`, `land-cta`, `land-og`, `land-legal`, `land-support`.
+Check with `liftoff verify --only land-page,land-og,land-legal` once deployed.
+
+Record: `liftoff step landing done --note "<url>"`, tick `land-cta`, `land-support`, `land-capture` (verify ticks the others).

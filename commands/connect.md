@@ -12,4 +12,4 @@ For the account in $ARGUMENTS (or each missing one the user wants), tell them wh
 ! node ${CLAUDE_PLUGIN_ROOT}/bin/liftoff.mjs accounts connect <id>
 ```
 
-Keys are stored in `~/.liftoff/credentials.env` (readable only by them) and injected into commands via `liftoff exec`. Never ask the user to paste a key into the conversation.
+Keys are stored in the OS keychain when one is available (otherwise `~/.liftoff/credentials.env`, readable only by them) and injected into commands via `liftoff exec --only <account>`. If keys are still in the file on a machine with a keychain, suggest `liftoff accounts migrate`. Never ask the user to paste a key into the conversation.

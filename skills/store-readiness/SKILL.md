@@ -5,7 +5,7 @@ description: Prepare App Store and Google Play submissions by going through the 
 
 # Store checks
 
-Run `liftoff checklist` and work through the **App Store** and **Google Play** groups. Fix what you can; turn the rest into tasks.
+Run `liftoff scan` first: it checks the code for the common rejection causes (missing or vague permission purpose strings, export compliance, Stripe checkout reachable in the iOS app, no account deletion, placeholder text, review notes without a demo login) and ticks or unticks the matching items. Fix every ✗ and run it again until it's clean. Then run `liftoff checklist` and work through the rest of the **App Store** and **Google Play** groups. Turn what only the user can do into tasks.
 
 ## App Store (common rejection reasons first)
 - **Account deletion in the app** (Guideline 5.1.1(v)): if the app has accounts, add a "Delete account" button in settings that deletes server data (and revokes Sign in with Apple tokens). Tick `ios-delete`.
@@ -25,6 +25,6 @@ Run `liftoff checklist` and work through the **App Store** and **Google Play** g
 - Account deletion: also needs a web URL (add `/delete-account` on the landing site).
 - New personal accounts: closed test with 12 testers for 14 days.
 
-Never press submit. When everything's ready, add the task "Submit <App> for review" (blocks release) and tell the user.
+Never press submit. The store-submission skill (next step) writes and uploads the listing and stops before Submit.
 
 Record: `liftoff step store-checks done --note "<n> items handled"` (or `blocked` with the reason) and tick each item you completed.

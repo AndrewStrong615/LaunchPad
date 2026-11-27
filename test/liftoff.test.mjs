@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'liftoff-'));
 process.env.LIFTOFF_HOME = path.join(tmp, 'home');
+process.env.LIFTOFF_SECRET_STORE = 'file';
 for (const k of ['STRIPE_SECRET_KEY', 'VERCEL_TOKEN']) delete process.env[k];
 
 const { detectProject } = await import('../lib/detect.mjs');
@@ -72,22 +73,24 @@ test('init picks steps for the platforms and auto-ticks what exists', () => {
 
 test('re-running init keeps progress', () => {
   const s = state.loadState(web);
-  state.setStep(s, 'payments', 'done', { provider: 'stripe' });
+  const paperwork = s.tasks.length;
+  state.setStep(s, 'payments', 'done', { provider: 'stripe', force: true });
   state.addTask(s, 'Add DNS records', { blocksRelease: true });
   state.saveState(s);
   const again = state.initProject(web);
   assert.equal(again.steps.payments.status, 'done');
-  assert.equal(again.tasks.length, 1);
+  assert.equal(again.tasks.length, paperwork + 1, 'paperwork tasks are not added twice');
 });
 
 test('summary counts blockers and readiness', () => {
   const s = state.loadState(web);
   const sum = state.summarize(s);
-  assert.equal(sum.blockingTasks, 1);
+  const paperworkBlocking = s.tasks.filter((t) => t.key && t.blocksRelease).length;
+  assert.equal(sum.blockingTasks, 1 + paperworkBlocking);
   assert.equal(sum.readyForRelease, false);
   assert.equal(sum.stepsDone, 1);
-  for (const step of Object.keys(s.steps)) state.setStep(s, step, 'done');
-  state.setTaskDone(s, s.tasks[0].id);
+  for (const step of sum.steps) state.setStep(s, step.id, 'done');
+  for (const t of s.tasks) state.setTaskDone(s, t.id);
   assert.equal(state.summarize(s).readyForRelease, true);
 });
 
@@ -120,13 +123,13 @@ test('CLI: exec injects stored keys without printing them elsewhere', () => {
 
 test('CLI: step, task, check, deploy and status', () => {
   const run = (...a) => execFileSync('node', [CLI, ...a, '--dir', expo], { env: process.env }).toString();
-  run('step', 'testflight', 'done', '--provider', 'eas');
+  run('step', 'testflight', 'done', '--provider', 'eas', '--force');
   run('task', 'add', 'Create app in App Store Connect', '--blocks');
   run('check', 'ios-delete');
   run('deploy', '--target', 'testflight', '--platform', 'ios', '--version', '1.4 (12)');
   const s = JSON.parse(run('status', '--json'));
   assert.equal(s.steps.find((x) => x.id === 'testflight').status, 'done');
-  assert.equal(s.blockingTasks, 1);
+  assert.equal(s.tasks.filter((t) => !t.key && t.blocksRelease).length, 1);
   assert.equal(s.checklist.find((c) => c.id === 'ios-delete').done, true);
   assert.equal(s.deploys[0].version, '1.4 (12)');
   assert.match(run('status'), /Fernweh/);

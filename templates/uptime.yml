@@ -1,0 +1,40 @@
+# Liftoff uptime check for {{APP_NAME}}.
+# Every 10 minutes, checks the health endpoint. A failed run emails you
+# (GitHub's default), and posts to Slack if SLACK_WEBHOOK_URL is set.
+# Set the repository variable LIFTOFF_HEALTH_URL, e.g. https://example.com{{HEALTH_PATH}}
+name: Uptime
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check health endpoint
+        env:
+          URL: ${{ vars.LIFTOFF_HEALTH_URL }}
+        run: |
+          test -n "$URL" || { echo "Set the LIFTOFF_HEALTH_URL repository variable"; exit 1; }
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$URL") || code=000
+            echo "Attempt $i: $code"
+            [ "$code" -ge 200 ] && [ "$code" -lt 300 ] && exit 0
+            sleep 20
+          done
+          echo "::error::$URL is down (last status $code)"
+          exit 1
+      - name: Alert Slack
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          URL: ${{ vars.LIFTOFF_HEALTH_URL }}
+        run: |
+          [ -z "$SLACK_WEBHOOK_URL" ] && exit 0
+          curl -s -X POST -H 'content-type: application/json' \
+            --data "{\"text\":\"{{APP_NAME}} is down: $URL (run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)\"}" \
+            "$SLACK_WEBHOOK_URL"

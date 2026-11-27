@@ -10,13 +10,14 @@ description: Deploy a web app to production on Vercel (default) or Cloudflare, w
 - Otherwise Vercel.
 
 ## Vercel
-1. `liftoff exec -- npx vercel link --yes` (uses `VERCEL_TOKEN` via `--token $VERCEL_TOKEN` if needed).
-2. Push env vars: for each required var (Stripe, Supabase, PostHog, Sentry…) `liftoff exec -- npx vercel env add NAME production` reading the value from the stored credentials. Never echo secrets.
-3. Deploy: `liftoff exec -- npx vercel deploy --prod --yes`. Capture the URL.
+1. `liftoff exec --only vercel -- npx vercel link --yes` (uses `VERCEL_TOKEN` via `--token $VERCEL_TOKEN` if needed).
+2. Push env vars: for each required var (Stripe, Supabase, PostHog, Sentry…) `liftoff exec --only vercel,<account> -- npx vercel env add NAME production` reading the value from the stored credentials. Never echo secrets.
+3. Deploy: `liftoff exec --only vercel -- npx vercel deploy --prod --yes`. Capture the URL. Record the project: `liftoff record hosting --resource vercel:project:<name>`.
 4. Connecting the Git repo gives preview deploys for pull requests (`vercel git connect`).
+5. A paid app can't stay on Vercel's Hobby plan (non-commercial use only): add a task to upgrade to Pro before launch (see `liftoff costs`).
 
 ## Cloudflare
-1. Static/SSR frameworks: `liftoff exec -- npx wrangler pages deploy <build-dir> --project-name <slug>`; Workers: `npx wrangler deploy`.
+1. Static/SSR frameworks: `liftoff exec --only cloudflare -- npx wrangler pages deploy <build-dir> --project-name <slug>`; Workers: `npx wrangler deploy`.
 2. Secrets: `npx wrangler secret put NAME` / Pages env vars in the project settings via API.
 
 ## Domain
@@ -25,5 +26,5 @@ Ask the user which domain to use (never buy one or change DNS without a yes). Ad
 ## Record
 - `liftoff deploy --target vercel --platform web --url https://<url> --status live`
 - `liftoff step hosting done --provider vercel --note "<domain>"`
-- Tick `host-deploy`, `host-env`, `host-https`, `host-previews`, `host-domain` (only once DNS resolves).
+- Run `liftoff verify --only host-deploy,host-https,host-domain`: it ticks those from the live site. Tick `host-env` and `host-previews` yourself.
 - If DNS is pending on the user: `liftoff task add "Add DNS records for <domain> at your registrar" --blocks`.
