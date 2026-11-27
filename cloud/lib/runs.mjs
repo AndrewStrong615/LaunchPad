@@ -4,7 +4,7 @@
 // requests for the user, who answers them in the web app.
 import crypto from 'node:crypto';
 import { STEPS, stepsFor } from '../../lib/catalog.mjs';
-import { kickoff } from './agent.mjs';
+import { DEFAULT_MODEL, EFFORT, MODELS, kickoff } from './agent.mjs';
 import { sandboxEnvPlan, syncVault } from './accounts.mjs';
 import { githubToken } from './importer.mjs';
 import { zipDirectory } from './archive.mjs';
@@ -36,6 +36,7 @@ export function publicRun(run, after = 0) {
     mode: run.mode,
     branch: run.branch || null,
     note: run.note || null,
+    model: run.model || null,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
     endedAt: run.endedAt || null,
@@ -100,10 +101,17 @@ export class RunManager {
 
   // ---------- starting ----------
 
-  async start(uid, slug, { steps = [], note = '' } = {}) {
+  // The model runs use when the person doesn't pick one.
+  defaultModel() {
+    const want = this.ctx.config.runModel;
+    return MODELS.some((m) => m.id === want) ? want : DEFAULT_MODEL;
+  }
+
+  async start(uid, slug, { steps = [], note = '', model = null } = {}) {
     const ready = this.readiness();
     if (!ready.ok) throw new HttpError(503, ready.why);
     const { store, config } = this.ctx;
+    if (model && !MODELS.some((m) => m.id === model)) throw new HttpError(400, `Pick one of these models: ${MODELS.map((m) => m.label).join(', ')}.`);
     const state = store.loadApp(uid, slug);
     if (!state) throw new HttpError(404, 'No such app');
 
@@ -130,6 +138,7 @@ export class RunManager {
       mode,
       branch: mode === 'github' ? `liftoff/launch-${day}-${crypto.randomBytes(2).toString('hex')}` : null,
       note: String(note || '').trim().slice(0, 1000) || null,
+      model: model || this.defaultModel(),
       createdAt: new Date().toISOString(),
       budgetUsd: config.runBudgetUsd,
       cost: null,
@@ -169,7 +178,8 @@ export class RunManager {
     }
     const text = kickoff({ state, steps: run.steps, mode: run.mode, branch: run.branch, envPlan: sandboxEnvPlan(store, run.uid), note: run.note });
     const session = await client.beta.sessions.create({
-      agent: config.anthropic.agentId,
+      // The agent's prompt and tools, on the model picked for this run.
+      agent: { type: 'agent_with_overrides', id: config.anthropic.agentId, model: { id: run.model || DEFAULT_MODEL, effort: EFFORT } },
       environment_id: config.anthropic.environmentId,
       title: `Liftoff: ${state.name}`,
       metadata: { liftoff_user: run.uid, liftoff_app: run.slug, liftoff_run: run.id },

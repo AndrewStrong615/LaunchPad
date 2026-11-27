@@ -58,7 +58,7 @@ test('the agent and environment are created once, then updated only when they ch
 
 test('the agent keeps keys out of reach and asks before risky steps', () => {
   const agent = agentDefinition();
-  assert.equal(agent.model.id, 'claude-opus-5-5');
+  assert.equal(agent.model.id, 'claude-sonnet-5-5');
   const toolset = agent.tools.find((t) => t.type === 'agent_toolset_20260401');
   assert.deepEqual(toolset.default_config.permission_policy, { type: 'auto' });
   assert.ok(toolset.configs.some((c) => c.name === 'web_fetch' && c.enabled === false));

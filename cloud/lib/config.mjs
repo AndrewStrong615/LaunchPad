@@ -56,6 +56,8 @@ export function loadConfig(env = process.env) {
       workspace: env.ANTHROPIC_WORKSPACE_ID || 'default',
     },
     runBudgetUsd: Number(env.LIFTOFF_RUN_BUDGET_USD || 15),
+    // The model runs use unless the person picks another (see MODELS in lib/agent.mjs).
+    runModel: env.LIFTOFF_RUN_MODEL || null,
     maxRunsPerUser: Number(env.LIFTOFF_MAX_ACTIVE_RUNS || 3),
     maxUploadBytes: Number(env.LIFTOFF_MAX_UPLOAD_MB || 50) * MB,
     maxSourceBytes: Number(env.LIFTOFF_MAX_SOURCE_MB || 200) * MB,

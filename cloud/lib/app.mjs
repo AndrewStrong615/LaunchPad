@@ -15,6 +15,7 @@ import { connectUserAccount, disconnectUserAccount, listUserAccounts } from './a
 import { githubToken, importFromGitHub, importFromZip, rescan } from './importer.mjs';
 import { pulseApp, validateSetting, verifyApp } from './tools.mjs';
 import { LIVE, publicRun } from './runs.mjs';
+import { MODELS } from './agent.mjs';
 import { isRunId, isSlug } from './store.mjs';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -163,6 +164,7 @@ export function createApp(ctx) {
         user: { login: user.login, name: user.name, avatar: user.avatar },
         github: { signedIn: !!store.getSecrets(uid).github, token: !!githubToken(store, uid), oauth: github.oauthEnabled },
         claude: ready,
+        models: { choices: MODELS, default: runs.defaultModel() },
         limits: { uploadMb: Math.round(config.maxUploadBytes / 1048576), runBudgetUsd: config.runBudgetUsd, maxRuns: config.maxRunsPerUser },
         settings: CONFIG_KEYS,
       });
@@ -264,7 +266,7 @@ export function createApp(ctx) {
         if (rest.length === 1 && M === 'POST') {
           limit(`run:${uid}`, 10, 3600000);
           const body = await readJson(req);
-          const run = await runs.start(uid, slug, { steps: body.steps || [], note: body.note || '' });
+          const run = await runs.start(uid, slug, { steps: body.steps || [], note: body.note || '', model: body.model ? String(body.model) : null });
           return ok(publicRun(run));
         }
         const id = rest[1];
