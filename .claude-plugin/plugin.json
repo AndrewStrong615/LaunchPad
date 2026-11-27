@@ -1,0 +1,7 @@
+{
+  "name": "liftoff",
+  "version": "0.1.0",
+  "description": "Launch your app from one command: payments, paywalls, hosting, analytics, crash reports, CI/CD, beta builds, a landing page and store checks, plus a local Mission Control dashboard.",
+  "author": { "name": "AndrewStrong615" },
+  "keywords": ["launch", "deploy", "stripe", "revenuecat", "vercel", "posthog", "sentry", "testflight"]
+}
