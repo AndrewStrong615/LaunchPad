@@ -3,24 +3,24 @@
 
 :root {
   --bubble: #ffffff;
-  --bubble-line: rgba(20, 20, 50, .08);
-  --code-bg: #0c0c14;
+  --bubble-line: rgba(0, 0, 0, .075);
+  --code-bg: #141413;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bubble: rgba(255, 255, 255, .065);
+    --bubble: rgba(255, 255, 255, .06);
     --bubble-line: rgba(255, 255, 255, .07);
-    --code-bg: #05050a;
+    --code-bg: #060606;
   }
 }
 
 .btn.big { height: 44px; padding: 0 20px; font-size: 14px; border-radius: 12px; }
 .btn.sm { height: 26px; padding: 0 9px; font-size: 12px; border-radius: 8px; }
 .btn.good {
-  background: linear-gradient(135deg, #2bd598, #10a874); border-color: transparent; color: #fff; text-shadow: 0 1px 1px rgba(0, 60, 30, .25);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3), 0 8px 20px -10px rgba(16, 168, 116, .9);
+  background: #0f9b6a; border-color: transparent; color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18), var(--glow);
 }
-.btn.good:hover { filter: brightness(1.06); background: linear-gradient(135deg, #2bd598, #10a874); border-color: transparent; }
+.btn.good:hover { filter: brightness(1.08); background: #0f9b6a; border-color: transparent; }
 .btn.danger { color: var(--bad); }
 .btn.danger:hover { background: var(--bad-soft); border-color: color-mix(in srgb, var(--bad) 30%, var(--line)); }
 
@@ -45,8 +45,8 @@ textarea.in, .field textarea { min-height: 80px; resize: vertical; line-height: 
 .stack-sm { display: flex; flex-direction: column; gap: 10px; }
 .card-pad { padding: 6px 18px 18px; }
 .head-tile {
-  width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; flex: none; color: #fff; background: var(--grad);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3), 0 6px 16px -8px rgba(96, 86, 255, .9);
+  width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; flex: none; color: var(--primary-ink); background: var(--primary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16), var(--glow);
 }
 .head-tile svg { width: 15px; height: 15px; }
 
@@ -73,7 +73,7 @@ textarea.in, .field textarea { min-height: 80px; resize: vertical; line-height: 
 
 /* sidebar foot: who's signed in */
 .who { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.who img, .who .ph { width: 26px; height: 26px; border-radius: 50%; flex: none; background: var(--grad); color: #fff; display: grid; place-items: center; font-size: 11px; font-weight: 650; box-shadow: 0 0 0 2px var(--line); }
+.who img, .who .ph { width: 26px; height: 26px; border-radius: 50%; flex: none; background: var(--primary); color: var(--primary-ink); display: grid; place-items: center; font-size: 11px; font-weight: 650; box-shadow: 0 0 0 2px var(--line); }
 .who .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 13px; font-weight: 500; }
 .who form { margin: 0; }
 
@@ -87,15 +87,15 @@ textarea.in, .field textarea { min-height: 80px; resize: vertical; line-height: 
 }
 .pick:hover { border-color: var(--line-strong); transform: translateY(-1px); }
 .pick:active { transform: scale(.985); }
-.pick.on { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: linear-gradient(160deg, var(--accent-soft), transparent 75%), var(--surface-2); box-shadow: inset 0 1px 0 var(--hi), 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent); }
+.pick.on { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); background: var(--surface-solid); box-shadow: inset 0 1px 0 var(--hi), var(--shadow-sm); }
 .pick input {
   appearance: none; margin: 1px 0 0; width: 18px; height: 18px; border-radius: 6px; border: 1.5px solid var(--faint); background: var(--field); flex: none;
   display: grid; place-items: center; cursor: pointer; transition: background-color var(--mid), border-color var(--fast), transform var(--mid) var(--spring);
 }
 .pick input[type=radio] { border-radius: 50%; }
-.pick input:checked { border-color: transparent; background: var(--grad); box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--accent) 80%, transparent); animation: tick-pop var(--slow) var(--spring); }
-.pick input[type=checkbox]:checked::after { content: ""; width: 8px; height: 4px; border: 2px solid #fff; border-top: 0; border-right: 0; transform: translateY(-1px) rotate(-45deg); }
-.pick input[type=radio]:checked::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #fff; }
+.pick input:checked { border-color: transparent; background: var(--primary); box-shadow: none; animation: tick-pop var(--slow) var(--spring); }
+.pick input[type=checkbox]:checked::after { content: ""; width: 8px; height: 4px; border: 2px solid var(--primary-ink); border-top: 0; border-right: 0; transform: translateY(-1px) rotate(-45deg); }
+.pick input[type=radio]:checked::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--primary-ink); }
 .pick .t { min-width: 0; }
 .pick .t b { font-weight: 600; display: block; }
 .pick .t .small { display: block; overflow: hidden; text-overflow: ellipsis; }
@@ -121,24 +121,17 @@ textarea.in, .field textarea { min-height: 80px; resize: vertical; line-height: 
 
 /* ---------- Claude's orb ---------- */
 .orb {
-  position: relative; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none; color: #fff;
-  background:
-    radial-gradient(circle at 30% 25%, rgba(255, 255, 255, .7) 0, transparent 32%),
-    radial-gradient(circle at 75% 85%, #37d2ff 0, transparent 55%),
-    linear-gradient(140deg, #a07cff, #5d5cff 55%, #2b8bff);
-  box-shadow: inset 0 -3px 6px rgba(10, 0, 60, .35), inset 0 1px 1px rgba(255, 255, 255, .6), 0 6px 16px -6px rgba(96, 86, 255, .9);
+  position: relative; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  color: var(--primary-ink); background: var(--primary); font-size: 12px; font-weight: 700; line-height: 1;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16), 0 1px 3px rgba(0, 0, 0, .2);
 }
-.orb svg.i { width: 14px; height: 14px; fill: #fff; stroke: none; filter: drop-shadow(0 1px 1px rgba(20, 0, 80, .35)); transition: transform var(--slow) var(--spring); }
-.orb.lg { width: 46px; height: 46px; }
-.orb.lg svg.i { width: 21px; height: 21px; }
+.orb.lg { width: 46px; height: 46px; font-size: 18px; }
 .orb.thinking::before {
   content: ""; position: absolute; inset: -4px; border-radius: 50%;
-  background: conic-gradient(from var(--angle), transparent 0 35%, #9b84ff 65%, #3cc7ff 85%, transparent);
+  background: conic-gradient(from var(--angle), transparent 0 35%, color-mix(in srgb, var(--run) 40%, transparent) 65%, var(--run) 88%, transparent);
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px)); mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
   animation: orbit 1.3s linear infinite;
 }
-.orb.thinking svg.i { animation: twinkle 2.2s var(--ease-in-out) infinite; }
-@keyframes twinkle { 50% { transform: rotate(90deg) scale(.8); } }
 .orb.waiting::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; box-shadow: 0 0 0 2px var(--warn-dot); animation: halo 2s var(--ease) infinite; }
 @keyframes halo { 0% { transform: scale(.9); opacity: .9; } 80%, 100% { transform: scale(1.35); opacity: 0; } }
 
@@ -192,8 +185,8 @@ textarea.in, .field textarea { min-height: 80px; resize: vertical; line-height: 
 .cmsg.claude:not(.first):not(.last) .bubble { border-top-left-radius: 7px; border-bottom-left-radius: 7px; }
 .cmsg.claude.last:not(.first) .bubble { border-top-left-radius: 7px; }
 .cmsg.you .bubble {
-  background: var(--grad); color: #fff; border-color: transparent; text-shadow: 0 1px 1px rgba(20, 0, 80, .2);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .25), 0 10px 24px -14px rgba(96, 86, 255, .95);
+  background: var(--primary); color: var(--primary-ink); border-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), var(--shadow-sm);
 }
 .cmsg.you.first:not(.last) .bubble { border-bottom-right-radius: 7px; }
 .cmsg.you:not(.first):not(.last) .bubble { border-top-right-radius: 7px; border-bottom-right-radius: 7px; }
@@ -270,7 +263,7 @@ details.sys pre.out { margin: 0 10px 10px; max-height: 320px; overflow: auto; }
 .acts-group.working { border-color: transparent; }
 .acts-group.working::after {
   content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none;
-  background: conic-gradient(from var(--angle), color-mix(in srgb, var(--run) 20%, transparent) 0 55%, var(--run) 75%, #a594ff 85%, color-mix(in srgb, var(--run) 20%, transparent) 100%);
+  background: conic-gradient(from var(--angle), color-mix(in srgb, var(--run) 20%, transparent) 0 55%, var(--run) 80%, color-mix(in srgb, var(--run) 20%, transparent) 100%);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
   animation: orbit 2.4s linear infinite;
 }
@@ -319,7 +312,7 @@ pre.cmd::before { content: "$ "; color: #8f8fa6; }
   color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer;
   transition: transform var(--mid) var(--spring), background-color var(--fast), color var(--fast), box-shadow var(--mid), border-color var(--fast);
 }
-.chip:hover { background: var(--grad); color: #fff; border-color: transparent; transform: translateY(-1px); box-shadow: var(--glow); }
+.chip:hover { background: var(--primary); color: var(--primary-ink); border-color: transparent; transform: translateY(-1px); box-shadow: var(--glow); }
 .chip:active { transform: scale(.95); }
 .chip:disabled { opacity: .5; }
 .ask-form { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
@@ -329,8 +322,8 @@ pre.cmd::before { content: "$ "; color: #8f8fa6; }
 
 /* the round send button */
 .send {
-  width: 36px; height: 36px; border-radius: 50%; border: 0; display: grid; place-items: center; flex: none; color: #fff; cursor: pointer; background: var(--grad);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3), 0 6px 18px -6px rgba(96, 86, 255, .9);
+  width: 36px; height: 36px; border-radius: 50%; border: 0; display: grid; place-items: center; flex: none; color: var(--primary-ink); cursor: pointer; background: var(--primary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16), var(--glow);
   transition: transform var(--mid) var(--spring), opacity var(--mid), filter var(--mid), box-shadow var(--mid);
 }
 .send svg.i { width: 17px; height: 17px; stroke-width: 2.3; transition: transform var(--mid) var(--spring); }
@@ -346,15 +339,7 @@ pre.cmd::before { content: "$ "; color: #8f8fa6; }
   background: var(--field); border: 1px solid var(--line); box-shadow: inset 0 1px 0 var(--hi), var(--shadow-sm);
   transition: border-color var(--mid), box-shadow var(--slow) var(--ease);
 }
-.composer-box:focus-within { border-color: transparent; box-shadow: 0 0 0 4px var(--accent-soft), 0 12px 34px -16px color-mix(in srgb, var(--accent) 80%, transparent); }
-/* A slow gradient rim runs around the box while you type. */
-.composer-box::before {
-  content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1.2px; pointer-events: none; opacity: 0;
-  background: conic-gradient(from var(--angle), #8a6bff, #2f9dff, #e86bd6, #8a6bff);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
-  transition: opacity var(--slow);
-}
-.composer-box:focus-within::before { opacity: 1; animation: orbit 5s linear infinite; }
+.composer-box:focus-within { border-color: var(--line-strong); box-shadow: 0 0 0 4px var(--accent-soft), var(--shadow); }
 .composer-box textarea.in {
   flex: 1; border: 0; background: none; box-shadow: none; resize: none; min-height: 0; height: 36px; max-height: 180px; padding: 8px 0; border-radius: 0;
   font-size: 14px; line-height: 1.45; color: var(--ink); outline: none;
@@ -436,15 +421,15 @@ dialog.modal .acts { display: flex; gap: 8px; justify-content: flex-end; margin-
 /* ---------- sign-in ---------- */
 .login-page { display: grid; place-items: center; min-height: 100vh; padding: 24px 16px; }
 .login { position: relative; width: 100%; display: grid; place-items: center; }
-.login-glow { position: absolute; width: min(620px, 100%); aspect-ratio: 1; border-radius: 50%; pointer-events: none; background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 22%, transparent), transparent); filter: blur(10px); animation: breathe 6s var(--ease-in-out) infinite; }
+.login-glow { position: absolute; width: min(620px, 100%); aspect-ratio: 1; border-radius: 50%; pointer-events: none; background: radial-gradient(closest-side, color-mix(in srgb, var(--ink) 6%, transparent), transparent); filter: blur(10px); animation: breathe 6s var(--ease-in-out) infinite; }
 .login-card { width: min(460px, 100%); padding: 34px 30px 28px; border-radius: 24px; animation: rise .8s var(--ease) backwards; }
 .login-card .brand { padding: 0 0 22px; }
 .login-mark { position: relative; width: 54px; height: 54px; margin: 0 0 22px; }
-.login-mark .mark { position: relative; z-index: 1; width: 54px; height: 54px; border-radius: 16px; display: grid; place-items: center; color: #fff; background: var(--grad); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 14px 34px -10px rgba(96, 86, 255, .95); animation: pop .9s var(--spring) .1s backwards; }
+.login-mark .mark { position: relative; z-index: 1; width: 54px; height: 54px; border-radius: 16px; display: grid; place-items: center; color: var(--primary-ink); background: var(--primary); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16), 0 14px 30px -14px rgba(0, 0, 0, .5); animation: pop .9s var(--spring) .1s backwards; }
 .login-mark .mark svg { width: 26px; height: 26px; }
 .login-mark::before {
   content: ""; position: absolute; inset: -7px; border-radius: 21px; padding: 1.5px;
-  background: conic-gradient(from var(--angle), transparent 0 40%, #9b84ff 70%, #3cc7ff 88%, transparent);
+  background: conic-gradient(from var(--angle), transparent 0 40%, var(--line-strong) 70%, var(--muted) 88%, transparent);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
   animation: orbit 3.2s linear infinite;
 }

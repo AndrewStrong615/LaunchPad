@@ -21,7 +21,7 @@
     arrowDown: '<path d="M12 5v14M6 13l6 6 6-6"/>',
     chevronDown: '<path d="m6 9 6 6 6-6"/>',
     stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
-    sparkle: '<path d="M12 3c.4 3.9 2.1 6.6 5 7.6.9.3 2 .4 4 .4-2 0-3.1.1-4 .4-2.9 1-4.6 3.7-5 7.6-.4-3.9-2.1-6.6-5-7.6-.9-.3-2-.4-4-.4 2 0 3.1-.1 4-.4 2.9-1 4.6-3.7 5-7.6z"/>',
+    play: '<path d="M8 5.6v12.8a1 1 0 0 0 1.5.86l10.2-6.4a1 1 0 0 0 0-1.72L9.5 4.74A1 1 0 0 0 8 5.6z"/>',
     download: '<path d="M12 4v12M7 11l5 5 5-5M5 20h14"/>',
     pr: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4M13 4l-2 2 2 2"/>',
     file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
@@ -78,11 +78,11 @@
     }
   }
 
-  // Claude's avatar: a small glass orb that glows while it works.
+  // Claude's avatar: a plain disc with its initial, ringed while it works.
   const orb = (status, lg) => h('span', {
     class: 'orb' + (lg ? ' lg' : '') + (status === 'running' || status === 'starting' ? ' thinking' : status === 'needs-you' ? ' waiting' : ''),
     'aria-hidden': 'true',
-  }, icon('sparkle'));
+  }, 'C');
 
   // Claude writes light Markdown: paragraphs, lists, `code`, **bold** and links.
   // Built as DOM nodes, never as HTML.
@@ -408,7 +408,7 @@
         h('label', { class: 'field' }, h('span', {}, 'Note for Claude ', h('span', { class: 'hint' }, '(optional)')),
           h('textarea', { class: 'in', oninput: (e) => { C.note = e.currentTarget.value; }, placeholder: 'Anything Claude should know? e.g. "Use Cloudflare, not Vercel" or "Price Pro at $8/month"', 'aria-label': 'Note for Claude', maxlength: '1000' }, C.note || '')),
         h('div', { class: 'launch-go' },
-          h('button', { class: 'btn primary big', type: 'button', disabled: !C.me?.claude.ok || !chosen.length, onclick: start }, icon('sparkle'), chosen.length === left.length ? 'Start the launch' : `Run ${chosen.length} step${chosen.length === 1 ? '' : 's'}`),
+          h('button', { class: 'btn primary big', type: 'button', disabled: !C.me?.claude.ok || !chosen.length, onclick: start }, icon('play'), chosen.length === left.length ? 'Start the launch' : `Run ${chosen.length} step${chosen.length === 1 ? '' : 's'}`),
           h('span', { class: 'small' }, `Budget ${usd(C.me?.limits.runBudgetUsd)} per run`))));
   }
 
@@ -759,7 +759,7 @@
 
   function runView() {
     const app = appOf(C.slug);
-    if (!app) return h('div', { class: 'card empty' }, h('div', { class: 'tile' }, icon('sparkle')), h('h2', {}, 'Pick an app'), h('p', {}, 'Open an app and choose Run with Claude.'));
+    if (!app) return h('div', { class: 'card empty' }, h('div', { class: 'tile' }, icon('play')), h('h2', {}, 'Pick an app'), h('p', {}, 'Open an app and choose Run with Claude.'));
     const run = C.run;
     const head = h('div', { class: 'page-head run-head' },
       Board.avatar(app, true),
@@ -767,7 +767,7 @@
       h('div', { class: 'actions' },
         run && LIVE.has(run.status) ? h('button', { class: 'btn', onclick: (e) => busy(e.currentTarget, async () => { C.run = await post(`/api/apps/${C.slug}/runs/${run.id}/stop`); render(); }) }, icon('stop'), 'Stop') : null,
         run && !OPEN.has(run.status) && run.model !== STRONGEST && models().some((m) => m.id === STRONGEST) && C.me?.claude.ok
-          ? h('button', { class: 'btn', title: 'Start a new run for the same steps on Claude Opus 5.5', onclick: (e) => busy(e.currentTarget, () => startRun(C.slug, { steps: run.steps, note: run.note || '', model: STRONGEST })) }, icon('sparkle'), 'Try again with Opus') : null,
+          ? h('button', { class: 'btn', title: 'Start a new run for the same steps on Claude Opus 5.5', onclick: (e) => busy(e.currentTarget, () => startRun(C.slug, { steps: run.steps, note: run.note || '', model: STRONGEST })) }, icon('refresh'), 'Try again with Opus') : null,
         run && !OPEN.has(run.status) ? h('button', { class: 'btn', onclick: () => { C.runId = null; C.run = null; C.pick = {}; remember(); render(); } }, icon('plus'), 'New run') : null,
         h('button', { class: 'btn quiet', onclick: () => go('app', app.slug) }, `Back to ${app.name}`, icon('arrow'))));
 
@@ -841,14 +841,14 @@
     heroMeta: sourceLine,
     heroActions: (app) => [
       h('button', { class: 'btn', title: 'Fetch the code again and rescan it', onclick: (e) => busy(e.currentTarget, async () => { toast('Rescanning…'); await post(`/api/apps/${app.slug}/rescan`); await refresh(true); toast('Rescanned'); }) }, icon('refresh'), 'Rescan'),
-      h('button', { class: 'btn primary', onclick: () => openRun(app.slug, app.cloud?.run && OPEN.has(app.cloud.run.status) ? app.cloud.run.id : null) }, icon('sparkle'), app.cloud?.run && OPEN.has(app.cloud.run.status) ? 'Open run' : 'Run with Claude'),
+      h('button', { class: 'btn primary', onclick: () => openRun(app.slug, app.cloud?.run && OPEN.has(app.cloud.run.status) ? app.cloud.run.id : null) }, icon('play'), app.cloud?.run && OPEN.has(app.cloud.run.status) ? 'Open run' : 'Run with Claude'),
     ],
     afterHero: (app) => [runCard(app), scanCard(app)],
     nextActionButton: (app, a) => (a.skill || a.command ? h('button', { class: 'btn', onclick: () => {
       const ids = app.steps.filter((s) => s.skill === a.skill && !['done', 'skipped'].includes(s.status)).map((s) => s.id);
       openRun(app.slug).then(() => { if (ids.length && !C.run) { C.pick = Object.fromEntries(app.steps.map((s) => [s.id, ids.includes(s.id)])); render(); } });
-    } }, icon('sparkle'), 'Do it with Claude') : null),
-    stepsHeadEnd: (app) => h('button', { class: 'btn', onclick: () => openRun(app.slug) }, icon('sparkle'), 'Run with Claude'),
+    } }, icon('play'), 'Do it with Claude') : null),
+    stepsHeadEnd: (app) => h('button', { class: 'btn', onclick: () => openRun(app.slug) }, icon('play'), 'Run with Claude'),
     mainBottom: settingsCard,
     afterRender: () => {
       const ta = document.querySelector('.composer textarea');

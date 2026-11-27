@@ -136,7 +136,7 @@ async function api(path, opts = {}) {
 }
 
 // ---------- helpers ----------
-const PALETTE = ['#6a5cff', '#10b981', '#f97316', '#ec4899', '#3b82f6', '#8b5cf6', '#14b8a6', '#f43f5e'];
+const PALETTE = ['#57534e', '#10b981', '#f97316', '#db2777', '#3b82f6', '#ca8a04', '#0d9488', '#e11d48'];
 function colorFor(slug) { let n = 0; for (const c of slug) n = (n * 31 + c.charCodeAt(0)) >>> 0; return PALETTE[n % PALETTE.length]; }
 function avatar(app, lg) { return h('span', { class: 'avatar' + (lg ? ' lg' : ''), style: { '--c': colorFor(app.slug) }, 'aria-hidden': 'true' }, app.name[0].toUpperCase()); }
 function host(url) { try { return new URL(url).host; } catch { return url; } }
