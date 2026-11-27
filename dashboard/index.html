@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mission Control</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --panel: #fffdf9; --ink: #1d1b17; --muted: #77716a; --line: #e6e1d8;
+    --accent: #2f4bd8; --accent-ink: #fff; --good: #1f9d55; --warn: #c76a12; --bad: #c4362c; --chip: #efebe3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151413; --panel: #1e1c1a; --ink: #f1ede6; --muted: #9b948a; --line: #34302b; --accent: #6f86ff; --chip: #2a2724; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 15px; margin: 0; letter-spacing: .02em; }
+  header .sub { color: var(--muted); }
+  .layout { display: grid; grid-template-columns: 260px 1fr; min-height: calc(100vh - 52px); }
+  @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } nav { border-right: 0 !important; border-bottom: 1px solid var(--line); } }
+  nav { border-right: 1px solid var(--line); padding: 16px 12px; }
+  nav h2 { font: 600 22px/1.2 Georgia, serif; margin: 0 8px 2px; }
+  nav .count { color: var(--muted); margin: 0 8px 12px; font-size: 12px; }
+  nav button { display: flex; width: 100%; align-items: center; gap: 10px; padding: 8px; border: 0; border-radius: 8px; background: none; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+  nav button:hover, nav button.on { background: var(--chip); }
+  nav .badge { margin-left: auto; font-size: 11px; color: var(--warn); font-weight: 600; }
+  .icon { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 13px; flex: none; }
+  main { padding: 20px; overflow: auto; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .panel h3 { margin: 0 0 4px; font: 600 18px/1.2 Georgia, serif; }
+  .panel .hint { color: var(--muted); margin: 0 0 12px; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 500; padding: 4px 6px; }
+  td { padding: 10px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+  .appname { font-weight: 600; } .small { font-size: 12px; color: var(--muted); }
+  .bar { height: 5px; border-radius: 3px; background: var(--chip); overflow: hidden; margin-top: 6px; display: flex; }
+  .bar span { display: block; height: 100%; }
+  .todo { color: var(--warn); font-weight: 600; white-space: nowrap; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 4px; }
+  .dot.live { background: var(--good); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--chip); font-size: 12px; }
+  .chip.done { background: color-mix(in srgb, var(--good) 15%, var(--panel)); }
+  .chip.running { background: color-mix(in srgb, var(--accent) 15%, var(--panel)); }
+  .chip.blocked { background: color-mix(in srgb, var(--bad) 15%, var(--panel)); }
+  .task { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .task.done .t { text-decoration: line-through; color: var(--muted); }
+  .tag { font-size: 10px; font-weight: 700; color: #fff; background: var(--bad); border-radius: 4px; padding: 2px 6px; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
+  .t { flex: 1; }
+  button.btn { border: 0; border-radius: 7px; padding: 6px 12px; background: var(--accent); color: var(--accent-ink); font: 600 12px/1 inherit; cursor: pointer; white-space: nowrap; }
+  button.ghost { background: var(--chip); color: var(--ink); }
+  form.add { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  form.add input[type=text] { flex: 1; min-width: 160px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--ink); font: inherit; }
+  label.inline { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+  .deploy { display: flex; gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); }
+  .deploy .v { margin-left: auto; font: 12px ui-monospace, monospace; color: var(--muted); }
+  details { border-top: 1px solid var(--line); padding: 8px 0; }
+  summary { cursor: pointer; font-weight: 600; display: flex; justify-content: space-between; }
+  .check { display: flex; gap: 8px; align-items: center; padding: 4px 0 4px 4px; cursor: pointer; }
+  .check input { accent-color: var(--good); }
+  .check .by { font-size: 11px; color: var(--muted); margin-left: auto; }
+  .ready { color: var(--good); font-weight: 600; }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+  a { color: var(--accent); }
+  code { font: 12px ui-monospace, monospace; background: var(--chip); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header><h1>Mission Control</h1><span class="sub" id="sub"></span></header>
+<div class="layout">
+  <nav>
+    <h2>All apps</h2>
+    <div class="count" id="count"></div>
+    <button id="overview-btn" class="on"><span class="icon">★</span>Overview</button>
+    <div id="applist"></div>
+  </nav>
+  <main id="main"></main>
+</div>
+<script>
+const state = { apps: [], accounts: [], selected: null };
+const $ = (id) => document.getElementById(id);
+
+function h(tag, attrs = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, '');
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  return el;
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { 'content-type': 'application/json' } });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+
+function progress(app) {
+  const done = app.stepsDone + app.checksDone;
+  const total = app.stepsTotal + app.checksTotal;
+  const blockers = app.blockingTasks;
+  const pct = total ? (done / total) * 100 : 0;
+  return h('div', { class: 'bar', title: `${done} of ${total} done` },
+    h('span', { style: `width:${pct}%;background:var(--good)` }),
+    h('span', { style: `width:${Math.min(blockers * 4, 100 - pct)}%;background:var(--bad)` }));
+}
+
+function liveBuilds(app) {
+  const live = app.deploys.filter((d) => d.status === 'live').length;
+  return h('span', { title: `${live} live of ${app.deploys.length} deploys` },
+    h('span', { class: 'dot' + (app.liveUrl ? ' live' : '') }), h('span', { class: 'dot' + (live ? ' live' : '') }));
+}
+
+function host(url) { try { return new URL(url).host; } catch { return url; } }
+
+function renderNav() {
+  const live = state.apps.filter((a) => a.liveUrl).length;
+  $('count').textContent = `${state.apps.length} apps · ${live} live`;
+  $('overview-btn').className = state.selected ? '' : 'on';
+  $('applist').replaceChildren(...state.apps.map((a) =>
+    h('button', { class: state.selected === a.slug ? 'on' : '', onclick: () => select(a.slug) },
+      h('span', { class: 'icon' }, a.name[0].toUpperCase()),
+      h('span', {}, a.name),
+      a.blockingTasks ? h('span', { class: 'badge' }, `${a.blockingTasks} blocking`) : null)));
+}
+
+function renderOverview() {
+  if (!state.apps.length) {
+    return h('div', { class: 'empty' }, 'No apps yet. Open an app in Claude Code and run ', h('code', {}, '/liftoff:onboard'), '.');
+  }
+  const allTasks = state.apps.flatMap((a) => a.tasks.filter((t) => !t.done).map((t) => ({ ...t, app: a })))
+    .sort((x, y) => y.blocksRelease - x.blocksRelease);
+  return h('div', { class: 'grid' },
+    h('section', { class: 'panel' },
+      h('h3', {}, 'Your tasks'),
+      h('p', { class: 'hint' }, 'Your decisions and your tasks — what blocks a release first.'),
+      allTasks.length ? allTasks.map((t) => taskRow(t.app, t, true)) : h('p', { class: 'small' }, 'Nothing waiting on you.')),
+    h('section', { class: 'panel' },
+      h('h3', {}, 'Status'),
+      h('p', { class: 'hint' }, `${state.apps.filter((a) => a.liveUrl).length} live of ${state.apps.length}`),
+      h('table', {},
+        h('tr', {}, h('th', {}, 'App'), h('th', {}, 'Live · builds'), h('th', {}, 'To do')),
+        state.apps.map((a) => h('tr', { style: 'cursor:pointer', onclick: () => select(a.slug) },
+          h('td', {}, h('div', { class: 'appname' }, a.name), h('div', { class: 'small' }, a.liveUrl ? host(a.liveUrl) : a.platforms.join(' · ')),
+            progress(a), h('div', { class: 'small' }, `${a.stepsDone + a.checksDone} done · ${a.stepsTotal + a.checksTotal - a.stepsDone - a.checksDone + a.openTasks} to do`)),
+          h('td', {}, liveBuilds(a)),
+          h('td', { class: 'todo' }, `${a.stepsTotal - a.stepsDone + a.checksTotal - a.checksDone + a.openTasks} to do`))))),
+    accountsPanel(state.accounts));
+}
+
+function accountsPanel(accounts) {
+  const connected = accounts.filter((a) => a.connected);
+  return h('section', { class: 'panel' },
+    h('h3', {}, 'Your accounts'),
+    h('p', { class: 'hint' }, 'Connected once on this machine, reused by every app.'),
+    accounts.map((a) => h('div', { class: 'deploy' },
+      h('span', { class: 'dot' + (a.connected ? ' live' : '') }),
+      h('span', {}, a.label),
+      h('span', { class: 'v' }, a.connected ? 'connected' : a.note))),
+    connected.length < accounts.length ? h('p', { class: 'small' }, 'Connect one with ', h('code', {}, 'liftoff accounts connect <id>'), '.') : null);
+}
+
+function taskRow(app, t, showApp) {
+  return h('div', { class: 'task' + (t.done ? ' done' : '') },
+    t.blocksRelease && !t.done ? h('span', { class: 'tag' }, 'Blocks release') : null,
+    h('span', { class: 't' }, showApp ? h('b', {}, app.name + ' · ') : null, t.title),
+    h('button', { class: 'btn' + (t.done ? ' ghost' : ''), onclick: () => mutate(`/api/apps/${app.slug}/tasks/${t.id}`, 'POST', { done: !t.done }) }, t.done ? 'Undo' : 'Mark done'),
+    t.done ? h('button', { class: 'btn ghost', onclick: () => mutate(`/api/apps/${app.slug}/tasks/${t.id}`, 'DELETE') }, 'Remove') : null);
+}
+
+function renderApp(app) {
+  const cats = [...new Set(app.checklist.map((c) => c.category))];
+  const input = h('input', { type: 'text', placeholder: 'Add a task…', 'aria-label': 'New task' });
+  const blocks = h('input', { type: 'checkbox' });
+  return h('div', {},
+    h('div', { class: 'panel', style: 'margin-bottom:16px' },
+      h('h3', {}, app.name),
+      h('div', { class: 'small' }, `${app.framework} · ${app.platforms.join(', ')} · ${app.root}`),
+      h('div', { class: 'chips' }, app.steps.map((s) => h('span', { class: 'chip ' + s.status, title: s.note || s.status },
+        { done: '✓', running: '◐', skipped: '–', blocked: '✗', todo: '○' }[s.status], s.label, s.provider ? ` · ${s.provider}` : ''))),
+      progress(app),
+      h('p', { class: app.readyForRelease ? 'ready' : 'small' }, app.readyForRelease ? 'Ready for users ✓' :
+        `${app.stepsDone}/${app.stepsTotal} launch steps · ${app.checksDone}/${app.checksTotal} checks · ${app.blockingTasks} blocking tasks`)),
+    h('div', { class: 'grid' },
+      h('section', { class: 'panel' },
+        h('h3', {}, 'Your tasks'),
+        h('p', { class: 'hint' }, 'What blocks a release comes first.'),
+        app.tasks.length ? app.tasks.map((t) => taskRow(app, t)) : h('p', { class: 'small' }, 'Nothing waiting on you.'),
+        h('form', { class: 'add', onsubmit: (e) => {
+          e.preventDefault();
+          if (!input.value.trim()) return;
+          mutate(`/api/apps/${app.slug}/tasks`, 'POST', { title: input.value, blocksRelease: blocks.checked });
+        } }, input, h('label', { class: 'inline' }, blocks, 'Blocks release'), h('button', { class: 'btn', type: 'submit' }, 'Add'))),
+      h('section', { class: 'panel' },
+        h('h3', {}, 'Status'),
+        h('p', { class: 'hint' }, 'Live'),
+        app.liveUrl ? h('a', { href: app.liveUrl, target: '_blank', rel: 'noopener' }, host(app.liveUrl) + ' ↗') : h('p', { class: 'small' }, 'Not live yet.'),
+        h('p', { class: 'hint', style: 'margin-top:14px' }, 'Deploys'),
+        app.deploys.length ? app.deploys.map((d) => h('div', { class: 'deploy' },
+          h('span', { class: 'dot' + (d.status === 'live' ? ' live' : '') }),
+          h('div', {}, h('div', {}, d.target), h('div', { class: 'small' }, d.platform === 'web' ? 'Web' : d.platform === 'ios' ? 'iOS · to your testers' : d.platform === 'android' ? 'Android · to your testers' : d.platform)),
+          h('span', { class: 'v' }, d.version || d.status))) : h('p', { class: 'small' }, 'Nothing deployed yet.'),
+        h('p', { class: 'hint', style: 'margin-top:14px' }, 'Recent activity'),
+        app.log.length ? app.log.slice().reverse().slice(0, 6).map((l) => h('div', { class: 'small' }, l.msg)) : h('p', { class: 'small' }, '—')),
+      h('section', { class: 'panel' },
+        h('h3', {}, 'Release readiness'),
+        h('p', { class: 'hint' }, `${app.checksDone} of ${app.checksTotal} handled`),
+        cats.map((cat) => {
+          const items = app.checklist.filter((c) => c.category === cat);
+          const done = items.filter((c) => c.done).length;
+          return h('details', { open: done < items.length },
+            h('summary', {}, h('span', {}, cat), h('span', { class: 'small' }, `${done}/${items.length}`)),
+            items.map((c) => h('label', { class: 'check' },
+              h('input', { type: 'checkbox', checked: c.done, onchange: (e) => mutate(`/api/apps/${app.slug}/checklist/${c.id}`, 'POST', { done: e.target.checked }) }),
+              h('span', {}, c.title),
+              c.done && c.by ? h('span', { class: 'by' }, c.by) : null)));
+        })),
+      accountsPanel(app.accounts)));
+}
+
+function render() {
+  renderNav();
+  const app = state.apps.find((a) => a.slug === state.selected);
+  $('sub').textContent = app ? `· ${app.name}` : '';
+  $('main').replaceChildren(app ? renderApp(app) : renderOverview());
+}
+
+async function mutate(path, method, body) {
+  try {
+    await api(path, { method, body: body ? JSON.stringify(body) : undefined });
+    await refresh();
+  } catch (err) { alert(err.message); }
+}
+
+function select(slug) {
+  state.selected = slug;
+  history.replaceState(null, '', slug ? `#${slug}` : '#');
+  render();
+}
+
+async function refresh() {
+  const [apps, accounts] = await Promise.all([api('/api/apps'), api('/api/accounts')]);
+  state.apps = apps;
+  state.accounts = accounts;
+  if (state.selected && !apps.some((a) => a.slug === state.selected)) state.selected = null;
+  // Don't clobber a half-typed task.
+  if (document.activeElement?.tagName !== 'INPUT' || document.activeElement.type !== 'text') render();
+}
+
+$('overview-btn').onclick = () => select(null);
+state.selected = decodeURIComponent(location.hash.slice(1)) || null;
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>
