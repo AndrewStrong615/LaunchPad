@@ -2,6 +2,10 @@
 // and Liftoff Cloud (cloud/). A host page adds views and controls with
 // Board.configure({ ...hooks }) and then calls Board.start(); the local page has no
 // hooks and starts on its own.
+//
+// Rendering builds fresh nodes with h() and then patches the live DOM to match
+// (see patch() below) instead of replacing it, so the few-second refresh keeps
+// hover, focus, scroll and running transitions, and only new things animate in.
 const state = { apps: [], accounts: [], view: 'overview', selected: null, open: {}, lastSync: null };
 const HOOKS = {};
 const hook = (name, ...args) => (typeof HOOKS[name] === 'function' ? HOOKS[name](...args) : undefined);
@@ -12,12 +16,84 @@ function h(tag, attrs = {}, ...kids) {
   for (const [k, v] of Object.entries(attrs || {})) {
     if (k === 'class') el.className = v;
     else if (k === 'style' && typeof v === 'object') for (const [p, x] of Object.entries(v)) p.startsWith('--') ? el.style.setProperty(p, x) : (el.style[p] = x);
-    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'key') el.setAttribute('data-key', v);
+    else if (k.startsWith('on')) {
+      (el.__on ||= {})[k.slice(2)] = v;
+      el.addEventListener(k.slice(2), dispatch);
+    }
     else if (v === true) el.setAttribute(k, '');
     else if (v !== false && v != null) el.setAttribute(k, v);
   }
-  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
   return el;
+}
+// Handlers live on the element so a patch can swap them without re-binding.
+function dispatch(e) {
+  const f = this.__on && this.__on[e.type];
+  return f ? f.call(this, e) : undefined;
+}
+
+// ---------- patching ----------
+// polling: a background refresh is rendering, so leave typed-in fields alone.
+let polling = false;
+const HANDLER_PROPS = ['onclick', 'onchange', 'oninput', 'onkeydown', 'onsubmit', 'ondragover', 'ondragleave', 'ondrop', 'onscroll', 'ontoggle', 'onfocus', 'onblur'];
+const keyOf = (n) => (n.nodeType === 1 ? n.getAttribute('data-key') : null);
+const asNodes = (kids) => kids.flat(Infinity).filter((k) => k != null && k !== false).map((k) => (k instanceof Node ? k : document.createTextNode(String(k))));
+
+// Make parent's children match kids, reusing live nodes where they line up
+// (by data-key when given, else by position and tag).
+function morph(parent, kids) {
+  const want = asNodes([kids]);
+  const old = [...parent.childNodes];
+  const byKey = new Map();
+  for (const n of old) if (keyOf(n) !== null) byKey.set(keyOf(n), n);
+  const used = new Set();
+  let i = 0;
+  const next = want.map((n) => {
+    const k = keyOf(n);
+    let match = null;
+    if (k !== null) {
+      const o = byKey.get(k);
+      if (o && o.nodeName === n.nodeName && !used.has(o)) match = o;
+    } else {
+      while (i < old.length && (used.has(old[i]) || keyOf(old[i]) !== null)) i++;
+      if (i < old.length && old[i].nodeName === n.nodeName) match = old[i++];
+    }
+    if (!match) return n;
+    used.add(match);
+    patch(match, n);
+    return match;
+  });
+  for (const n of old) if (!used.has(n)) n.remove();
+  next.forEach((n, idx) => {
+    const at = parent.childNodes[idx];
+    if (at !== n) parent.insertBefore(n, at || null);
+  });
+}
+
+function patch(a, b) {
+  if (a.nodeType !== 1) {
+    if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
+    return;
+  }
+  for (const { name } of [...a.attributes]) if (name !== 'style' && !b.hasAttribute(name)) a.removeAttribute(name);
+  for (const { name, value } of [...b.attributes]) if (name !== 'style' && a.getAttribute(name) !== value) a.setAttribute(name, value);
+  // Styles go through the CSSOM, since the cloud's CSP blocks style attributes
+  // set as text. The cursor-spotlight position (--mx/--my) stays on the live node.
+  for (const prop of [...a.style]) if (prop !== '--mx' && prop !== '--my' && !b.style.getPropertyValue(prop)) a.style.removeProperty(prop);
+  for (const prop of b.style) {
+    const v = b.style.getPropertyValue(prop);
+    if (a.style.getPropertyValue(prop) !== v) a.style.setProperty(prop, v, b.style.getPropertyPriority(prop));
+  }
+  a.__on = b.__on;
+  for (const t of Object.keys(b.__on || {})) a.addEventListener(t, dispatch);
+  for (const p of HANDLER_PROPS) if (a[p] !== b[p]) a[p] = b[p];
+  const tag = a.nodeName;
+  if (tag !== 'TEXTAREA') morph(a, [...b.childNodes]);
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+    if (a.type === 'checkbox' || a.type === 'radio') { if (a.checked !== b.checked) a.checked = b.checked; }
+    else if (a.type !== 'file' && !polling && a.value !== b.value) a.value = b.value;
+  }
 }
 
 // Small inline icon set (stroke icons, 24px grid).
@@ -60,9 +136,9 @@ async function api(path, opts = {}) {
 }
 
 // ---------- helpers ----------
-const PALETTE = ['#5b5bd6', '#0e9f6e', '#d9480f', '#c2255c', '#1c7ed6', '#7048e8', '#0b7285', '#a61e4d'];
+const PALETTE = ['#57534e', '#10b981', '#f97316', '#db2777', '#3b82f6', '#ca8a04', '#0d9488', '#e11d48'];
 function colorFor(slug) { let n = 0; for (const c of slug) n = (n * 31 + c.charCodeAt(0)) >>> 0; return PALETTE[n % PALETTE.length]; }
-function avatar(app, lg) { return h('span', { class: 'avatar' + (lg ? ' lg' : ''), style: { background: colorFor(app.slug) }, 'aria-hidden': 'true' }, app.name[0].toUpperCase()); }
+function avatar(app, lg) { return h('span', { class: 'avatar' + (lg ? ' lg' : ''), style: { '--c': colorFor(app.slug) }, 'aria-hidden': 'true' }, app.name[0].toUpperCase()); }
 function host(url) { try { return new URL(url).host; } catch { return url; } }
 function doneCount(a) { return a.stepsDone + a.checksDone; }
 function totalCount(a) { return a.stepsTotal + a.checksTotal; }
@@ -98,20 +174,20 @@ function stepSegments(a) {
 
 // ---------- sidebar + topbar ----------
 function renderNav() {
-  $('brand-mark').replaceChildren(icon('rocket'));
+  morph($('brand-mark'), [icon('rocket')]);
   const ov = $('nav-overview');
   ov.className = 'nav' + (state.view === 'overview' ? ' on' : '');
-  ov.replaceChildren(icon('grid'), 'Overview');
+  morph(ov, [icon('grid'), h('span', {}, 'Overview')]);
   const connected = state.accounts.filter((a) => a.connected).length;
   const ac = $('nav-accounts');
   ac.className = 'nav' + (state.view === 'accounts' ? ' on' : '');
-  ac.replaceChildren(icon('key'), 'Accounts', h('span', { class: 'end' }, h('span', { class: 'count' }, `${connected}/${state.accounts.length}`)));
-  $('nav-extra').replaceChildren(...[hook('navExtra')].flat().filter(Boolean));
+  morph(ac, [icon('key'), h('span', {}, 'Accounts'), h('span', { class: 'end' }, h('span', { class: 'count' }, `${connected}/${state.accounts.length}`))]);
+  morph($('nav-extra'), [hook('navExtra')]);
   const foot = hook('sideFoot');
-  if (foot) document.querySelector('.side .foot').replaceChildren(...[foot].flat());
+  if (foot) morph(document.querySelector('.side .foot'), [foot]);
   $('app-count').textContent = state.apps.length || '';
-  $('applist').replaceChildren(...state.apps.map((a) =>
-    h('button', { class: 'nav' + (state.view === 'app' && state.selected === a.slug ? ' on' : ''), onclick: () => go('app', a.slug), title: a.name },
+  morph($('applist'), state.apps.map((a) =>
+    h('button', { class: 'nav' + (state.view === 'app' && state.selected === a.slug ? ' on' : ''), key: a.slug, onclick: () => go('app', a.slug), title: a.name },
       avatar(a), h('span', {}, a.name),
       h('span', { class: 'end' },
         hook('appBadge', a),
@@ -119,16 +195,40 @@ function renderNav() {
         h('span', { class: 'status-dot' + (a.liveUrl ? ' live' : ''), title: a.liveUrl ? 'Live' : 'Not live' })))));
 }
 
+// The selected-item pill glides to whichever nav item is on.
+function placeNavPill() {
+  const side = document.querySelector('.side');
+  if (!side) return;
+  let pill = side.querySelector(':scope > .nav-ind');
+  if (!pill) {
+    pill = h('span', { class: 'nav-ind', 'aria-hidden': 'true' });
+    side.prepend(pill);
+  }
+  const on = side.querySelector('.nav.on');
+  if (!on || !on.offsetWidth) return pill.classList.remove('on');
+  const jump = !pill.classList.contains('on');
+  if (jump) pill.style.transition = 'none';
+  pill.style.width = `${on.offsetWidth}px`;
+  pill.style.height = `${on.offsetHeight}px`;
+  pill.style.transform = `translate(${on.offsetLeft}px, ${on.offsetTop}px)`;
+  if (jump) {
+    void pill.offsetWidth;
+    pill.style.transition = '';
+  }
+  pill.classList.add('on');
+}
+
 function renderTopbar(app) {
   const crumbs = [h('button', { class: 'crumb', onclick: () => go('overview') }, HOOKS.brand || 'Flight Board')];
   const extra = HOOKS.views?.[state.view];
-  if (state.view === 'app' && app) crumbs.push(h('span', {}, '/'), h('b', {}, app.name));
-  else if (extra) crumbs.push(h('span', {}, '/'), h('b', {}, extra.title));
-  else if (state.view === 'accounts') crumbs.push(h('span', {}, '/'), h('b', {}, 'Accounts'));
-  else crumbs.push(h('span', {}, '/'), h('b', {}, 'Overview'));
-  $('topbar').replaceChildren(...crumbs,
+  const sep = () => h('span', { class: 'sep' }, '/');
+  if (state.view === 'app' && app) crumbs.push(sep(), h('b', {}, app.name));
+  else if (extra) crumbs.push(sep(), h('b', {}, extra.title));
+  else if (state.view === 'accounts') crumbs.push(sep(), h('b', {}, 'Accounts'));
+  else crumbs.push(sep(), h('b', {}, 'Overview'));
+  morph($('topbar'), [...crumbs,
     h('span', { class: 'sync', title: 'Refreshes every few seconds' }, h('span', { class: 'status-dot live' }), state.lastSync ? 'Synced' : 'Connecting…'),
-    ...[hook('topbarEnd')].flat().filter(Boolean));
+    hook('topbarEnd')]);
 }
 
 // ---------- overview ----------
@@ -173,14 +273,14 @@ function renderOverview() {
 }
 
 function stat(label, value, of, hint, alert) {
-  return h('div', { class: 'stat' + (alert ? ' alert' : '') },
+  return h('div', { class: 'stat spot' + (alert ? ' alert' : '') },
     h('div', { class: 'label' }, label),
     h('div', { class: 'value' }, value, of ? h('small', {}, ' ' + of) : null),
     h('div', { class: 'hint' }, hint));
 }
 
 function appCard(a) {
-  return h('button', { class: 'card app-card', onclick: () => go('app', a.slug), 'aria-label': `Open ${a.name}` },
+  return h('button', { class: 'card app-card spot', key: a.slug, onclick: () => go('app', a.slug), 'aria-label': `Open ${a.name}` },
     h('div', { class: 'top' }, avatar(a),
       h('div', { style: { minWidth: 0 } }, h('div', { class: 'nm' }, a.name), h('div', { class: 'sub' }, a.liveUrl ? host(a.liveUrl) : a.platforms.map((p) => PLATFORM[p] || p).join(' · '))),
       appStatus(a)),
@@ -252,7 +352,7 @@ function pulseTile(label, value, delta, dir) {
 }
 function pulseCard(app) {
   const p = app.pulse;
-  const refreshBtn = h('button', { class: 'btn quiet', onclick: (e) => { e.target.disabled = true; mutate(`/api/apps/${app.slug}/pulse`, 'POST'); } }, icon('activity'), 'Refresh');
+  const refreshBtn = h('button', { class: 'btn quiet', onclick: (e) => { e.currentTarget.disabled = true; mutate(`/api/apps/${app.slug}/pulse`, 'POST'); } }, icon('activity'), 'Refresh');
   const head = h('div', { class: 'card-head' }, h('h2', {}, 'Pulse'), p ? h('span', { class: 'sub' }, ago(p.at)) : null, h('span', { class: 'end' }, refreshBtn));
   if (!p) return h('section', { class: 'card' }, head, h('div', { class: 'card-body' }, h('div', { class: 'empty-row' }, 'No numbers yet. Refresh once Stripe or RevenueCat, PostHog and Sentry are connected.')));
   const tiles = [];
@@ -300,7 +400,7 @@ function nextCard(app) {
 
 function taskRow(app, t, showApp) {
   const url = `/api/apps/${app.slug}/tasks/${t.id}`;
-  return h('div', { class: 'task' + (t.done ? ' done' : '') },
+  return h('div', { class: 'task' + (t.done ? ' done' : ''), key: `${app.slug}/${t.id}` },
     h('button', { class: 'tick', 'aria-label': t.done ? `Mark "${t.title}" not done` : `Mark "${t.title}" done`, title: t.done ? 'Undo' : 'Mark done',
       onclick: () => mutate(url, 'POST', { done: !t.done }) }, icon('check')),
     h('div', { class: 't' },
@@ -320,13 +420,13 @@ const STEP_WORD = { done: 'Done', skipped: 'Skipped', running: 'In progress', bl
 
 function renderApp(app) {
   const cats = [...new Set(app.checklist.map((c) => c.category))];
-  const input = h('input', { type: 'text', placeholder: 'Add a task for yourself…', 'aria-label': 'New task', maxlength: '200' });
-  const blocks = h('input', { type: 'checkbox' });
+  const input = h('input', { type: 'text', name: 'title', placeholder: 'Add a task for yourself…', 'aria-label': 'New task', maxlength: '200' });
+  const blocks = h('input', { type: 'checkbox', name: 'blocks' });
   const p = pct(app);
   const openKey = (cat) => `${app.slug}:${cat}`;
 
   return [
-    h('section', { class: 'card hero' },
+    h('section', { class: 'card hero', style: { '--c': colorFor(app.slug) } },
       h('div', { class: 'id' }, avatar(app, true),
         h('div', { style: { minWidth: 0 } },
           h('h1', {}, app.name, appStatus(app)),
@@ -368,15 +468,16 @@ function renderApp(app) {
             h('div', { class: 'rows' }, app.tasks.length ? app.tasks.map((t) => taskRow(app, t)) : h('div', { class: 'empty-row' }, icon('checkCircle'), 'Nothing waiting on you.')),
             h('form', { class: 'add', onsubmit: (e) => {
               e.preventDefault();
-              if (!input.value.trim()) return;
-              mutate(`/api/apps/${app.slug}/tasks`, 'POST', { title: input.value, blocksRelease: blocks.checked });
+              const f = e.currentTarget.elements;
+              if (!f.title.value.trim()) return;
+              mutate(`/api/apps/${app.slug}/tasks`, 'POST', { title: f.title.value, blocksRelease: f.blocks.checked });
             } }, input, h('label', {}, blocks, 'Blocks release'), h('button', { class: 'btn primary', type: 'submit' }, icon('plus'), 'Add')))),
 
         h('section', { class: 'card' },
           h('div', { class: 'card-head' }, h('h2', {}, 'Release readiness'), h('span', { class: 'count' }, `${app.checksDone}/${app.checksTotal}`),
             h('span', { class: 'end' },
               h('span', { class: 'sub' }, app.lastVerifiedAt ? `Verified ${ago(app.lastVerifiedAt)}` : 'Not verified yet'),
-              h('button', { class: 'btn', title: 'Check against the live site and connected services', onclick: (e) => { e.target.disabled = true; toast('Checking the live site and services…'); mutate(`/api/apps/${app.slug}/verify`, 'POST'); } }, icon('checkCircle'), 'Verify'))),
+              h('button', { class: 'btn', title: 'Check against the live site and connected services', onclick: (e) => { e.currentTarget.disabled = true; toast('Checking the live site and services…'); mutate(`/api/apps/${app.slug}/verify`, 'POST'); } }, icon('checkCircle'), 'Verify'))),
           cats.map((cat) => {
             const items = app.checklist.filter((c) => c.category === cat);
             const done = items.filter((c) => c.done).length;
@@ -428,19 +529,36 @@ function render() {
   renderTopbar(app);
   const extra = HOOKS.views?.[state.view];
   const view = state.view === 'app' ? renderApp(app) : extra ? extra.render() : state.view === 'accounts' ? renderAccounts() : renderOverview();
-  $('main').replaceChildren(...[view].flat(Infinity).filter(Boolean));
+  const main = $('main');
+  // A new view replaces the page and slides in; the same view is patched in place.
+  const key = `${state.view}:${state.view === 'app' ? state.selected : extra?.key?.() ?? ''}`;
+  if (key !== shownView) {
+    shownView = key;
+    main.replaceChildren(...asNodes([view]));
+    main.classList.remove('entering');
+    void main.offsetWidth;
+    main.classList.add('entering');
+    clearTimeout(enterTimer);
+    enterTimer = setTimeout(() => main.classList.remove('entering'), 1400);
+  } else morph(main, [view]);
   const brand = HOOKS.brand || 'Flight Board';
   document.title = state.view === 'app' ? `${app.name} · ${brand}` : extra ? `${extra.title} · ${brand}` : brand;
+  placeNavPill();
   hook('afterRender');
 }
+let shownView = null;
+let enterTimer;
 
 let toastTimer;
 function toast(msg) {
-  document.querySelector('.toast')?.remove();
+  for (const t of document.querySelectorAll('.toast')) t.remove();
   const el = h('div', { class: 'toast', role: 'status' }, msg);
   document.body.append(el);
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.remove(), 3200);
+  toastTimer = setTimeout(() => {
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 300);
+  }, 3200);
 }
 
 async function copy(text) {
@@ -463,6 +581,16 @@ function go(view, slug = null) {
   window.scrollTo(0, 0);
 }
 
+// Re-render without resetting typed-in fields (for async updates while someone types).
+function repaint() {
+  polling = true;
+  try {
+    render();
+  } finally {
+    polling = false;
+  }
+}
+
 async function refresh(force) {
   try {
     const [apps, accounts] = await Promise.all([api('/api/apps'), api('/api/accounts'), hook('load')]);
@@ -474,10 +602,9 @@ async function refresh(force) {
     if (force) toast(err.message);
     return;
   }
-  // Don't clobber something half-typed.
-  const a = document.activeElement;
-  const typing = (a?.tagName === 'INPUT' && !['checkbox', 'radio', 'file'].includes(a.type)) || a?.tagName === 'TEXTAREA' || a?.tagName === 'SELECT';
-  if (force || !typing) render();
+  // A background refresh patches the page but leaves whatever is typed in fields alone.
+  if (force) render();
+  else repaint();
 }
 
 function configure(hooks) {
@@ -490,6 +617,15 @@ function start() {
   started = true;
   $('nav-overview').onclick = () => go('overview');
   $('nav-accounts').onclick = () => go('accounts');
+  // Cursor spotlight on .spot cards.
+  document.addEventListener('pointermove', (e) => {
+    const el = e.target instanceof Element ? e.target.closest('.spot') : null;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    el.style.setProperty('--mx', `${Math.round(e.clientX - r.left)}px`);
+    el.style.setProperty('--my', `${Math.round(e.clientY - r.top)}px`);
+  }, { passive: true });
+  addEventListener('resize', placeNavPill, { passive: true });
   const hash = decodeURIComponent(location.hash.slice(1));
   if (hash === 'accounts') state.view = 'accounts';
   else if (hash.startsWith('!') && HOOKS.views?.[hash.slice(1)]) state.view = hash.slice(1);
@@ -503,5 +639,5 @@ function start() {
   setTimeout(tick, hook('pollMs') || 4000);
 }
 
-window.Board = { configure, start, state, h, icon, api, mutate, go, render, refresh, toast, copy, ago, colorFor, avatar, host, plural, money, PLATFORM, STEP_WORD, ICONS };
+window.Board = { configure, start, state, h, icon, api, mutate, go, render, refresh, toast, copy, ago, colorFor, avatar, host, plural, money, morph, repaint, PLATFORM, STEP_WORD, ICONS };
 if (!document.body.hasAttribute('data-board-manual')) start();

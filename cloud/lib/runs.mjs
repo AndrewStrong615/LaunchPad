@@ -570,8 +570,15 @@ export class RunManager {
     if (run.status === 'budget') throw new HttpError(409, 'This run is paused at its budget. Raise the budget to keep going.');
     if (run.status === 'failed' && !run.sessionId) throw new HttpError(409, 'This run failed before it started.');
     this.live.set(run.id, run);
-    await this.client.beta.sessions.events.send(run.sessionId, { events: [{ type: 'user.message', content: [{ type: 'text', text: msg }] }] });
-    this.push(run, { kind: 'you', text: msg });
+    // Add the message before sending it: the session can echo it back on the
+    // stream before send() returns, and the echo is only skipped if it's here.
+    const entry = this.push(run, { kind: 'you', text: msg });
+    try {
+      await this.client.beta.sessions.events.send(run.sessionId, { events: [{ type: 'user.message', content: [{ type: 'text', text: msg }] }] });
+    } catch (e) {
+      run.events.splice(run.events.indexOf(entry), 1);
+      throw e;
+    }
     run.status = 'running';
     run.endedAt = null;
     run.error = null;
