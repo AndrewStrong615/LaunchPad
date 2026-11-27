@@ -228,7 +228,7 @@ test('a cloud run: Claude calls Liftoff tools, asks for approval and a choice, a
     s.pr = await tools.custom('open_pull_request', { branch: 'x', title: 't', body: 'b' });
     s.outputs = [{ id: 'file_out1', filename: 'liftoff-changes.patch', size_bytes: 5, body: 'patch' }];
     tools.emit({ type: 'agent.message', content: [{ type: 'text', text: '✓ Hosting + domain: Vercel, live' }] });
-    tools.end('2.50');
+    tools.end('250');
   });
   const srv = await startTest({ anthropic: client });
   t.after(() => srv.stop());
@@ -269,7 +269,7 @@ test('a cloud run: Claude calls Liftoff tools, asks for approval and a choice, a
   r = await me.post(`${url}/answer`, { eventId: run.pending[0].id, text: 'invoicely.app' });
   assert.equal(r.status, 200);
 
-  run = await until(async () => { const x = (await me.get(url)).body; return x.status === 'finished' && x; });
+  run = await until(async () => { const x = (await me.get(url)).body; return x.status === 'finished' && x.cost !== null && x; });
   assert.equal(run.cost, 2.5);
   assert.equal(session.approval, 'allow');
   assert.match(session.answer.text, /invoicely\.app/);
@@ -301,7 +301,7 @@ test('a cloud run: Claude calls Liftoff tools, asks for approval and a choice, a
   assert.equal(create.resources[0].type, 'file');
   assert.equal(create.resources[0].mount_path, '/app.zip');
   assert.equal(create.vault_ids.length, 1);
-  assert.deepEqual(create.budget, { type: 'limit', max_list_cost: { amount: '15.00', currency: 'USD' } });
+  assert.deepEqual(create.budget, { type: 'limit', max_list_cost: { amount: '1500', currency: 'USD' } });
   const kickoffText = create.initial_events[0].content[0].text;
   assert.match(kickoffText, /Steps to run: hosting/);
   assert.match(kickoffText, /STRIPE_SECRET_KEY/);
@@ -450,4 +450,34 @@ test('runs pick up where they left off after a restart', async (t) => {
   assert.ok(run.events.filter((e) => e.text === 'hosting → running').length === 1, 'no duplicate events after reconnecting');
   const app = (await me2.get('/api/apps/invoicely')).body;
   assert.equal(app.steps.find((s) => s.id === 'hosting').note, 'after restart');
+});
+
+test('a run that reaches its budget pauses, and continues when the user adds more', async (t) => {
+  const client = fakeAnthropic(async (s, tools) => {
+    await tools.custom('liftoff_step', { step: 'hosting', status: 'running' });
+    await tools.budget('1503');
+    await tools.custom('liftoff_step', { step: 'hosting', status: 'done' });
+    tools.end('1840');
+  });
+  const srv = await startTest({ anthropic: client });
+  t.after(() => srv.stop());
+  const me = await signIn(srv.base);
+  const zip = zipDirectory(path.join(FIXTURES, 'next-saas'));
+  await me.call('POST', '/api/import/zip?name=a.zip', zip, { 'content-type': 'application/zip' });
+  let r = await me.post('/api/apps/invoicely/runs', { steps: ['hosting'] });
+  assert.equal(r.status, 200, r.text);
+  const url = `/api/apps/invoicely/runs/${r.body.id}`;
+
+  let run = await until(async () => { const x = (await me.get(url)).body; return x.status === 'budget' && x; });
+  assert.equal(run.cost, 15.03);
+  r = await me.post(`${url}/message`, { text: 'keep going' });
+  assert.equal(r.status, 409);
+  r = await me.post(`${url}/budget`, { addUsd: 10 });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(r.body.budgetUsd, 25.03);
+  const update = client.calls.find((c) => c[0] === 'sessions.update');
+  assert.deepEqual(update[2].budget, { type: 'limit', max_list_cost: { amount: '2503', currency: 'USD' } });
+
+  run = await until(async () => { const x = (await me.get(url)).body; return x.status === 'finished' && x.cost === 18.4 && x; });
+  assert.equal(run.budgetUsd, 25.03);
 });

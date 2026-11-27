@@ -19,6 +19,12 @@ const MAX_EVENTS = 600;
 const clip = (s, n) => (s && s.length > n ? `${s.slice(0, n)}…` : s || '');
 const textOf = (content) => (Array.isArray(content) ? content.filter((b) => b?.type === 'text').map((b) => b.text).join('\n') : '');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// The API takes and reports money in cents, as an integer string ("1500" is $15.00).
+export const toCents = (usd) => String(Math.round(usd * 100));
+export const fromCents = (amount) => {
+  const n = Number(amount);
+  return amount != null && amount !== '' && Number.isFinite(n) ? n / 100 : null;
+};
 
 // What the web app shows for a run.
 export function publicRun(run, after = 0) {
@@ -169,7 +175,7 @@ export class RunManager {
       metadata: { liftoff_user: run.uid, liftoff_app: run.slug, liftoff_run: run.id },
       resources,
       vault_ids: vaultId ? [vaultId] : [],
-      budget: { type: 'limit', max_list_cost: { amount: run.budgetUsd.toFixed(2), currency: 'USD' } },
+      budget: { type: 'limit', max_list_cost: { amount: toCents(run.budgetUsd), currency: 'USD' } },
       initial_events: [{ type: 'user.message', content: [{ type: 'text', text }] }],
     });
     run.sessionId = session.id;
@@ -375,8 +381,8 @@ export class RunManager {
         break;
       }
       case 'session.usage': {
-        const amount = Number(ev.list_cost?.amount ?? ev.usage?.list_cost?.amount);
-        if (Number.isFinite(amount)) run.cost = amount;
+        const cost = fromCents(ev.usage?.list_cost?.amount);
+        if (cost !== null) run.cost = cost;
         break;
       }
       case 'agent.thread_context_compacted':
@@ -393,6 +399,8 @@ export class RunManager {
       if (run.pending.length) run.status = 'needs-you';
       return;
     }
+    // The session has stopped working for now: read what it has cost so far.
+    this.refreshCost(run);
     if (why === 'budget_reached') {
       run.status = 'budget';
       this.push(run, { id: ev.id, at, kind: 'status', text: `Paused at the $${run.budgetUsd} budget for this run` });
@@ -456,6 +464,17 @@ export class RunManager {
     return this.client.beta.sessions.events.send(run.sessionId, {
       events: [{ type: 'user.custom_tool_result', custom_tool_use_id: id, content: [{ type: 'text', text: text || '(no output)' }], is_error: isError }],
     });
+  }
+
+  async refreshCost(run) {
+    try {
+      const session = await this.client.beta.sessions.retrieve(run.sessionId);
+      const cost = fromCents(session?.usage?.list_cost?.amount);
+      if (cost !== null && cost !== run.cost) {
+        run.cost = cost;
+        this.save(run);
+      }
+    } catch {}
   }
 
   async collectOutputs(run) {
@@ -589,7 +608,7 @@ export class RunManager {
     if (run.status !== 'budget') throw new HttpError(409, 'This run is not paused at its budget.');
     this.live.set(run.id, run);
     const next = Math.round((Math.max(run.cost ?? 0, run.budgetUsd) + add) * 100) / 100;
-    await this.client.beta.sessions.update(run.sessionId, { budget: { type: 'limit', max_list_cost: { amount: next.toFixed(2), currency: 'USD' } } });
+    await this.client.beta.sessions.update(run.sessionId, { budget: { type: 'limit', max_list_cost: { amount: toCents(next), currency: 'USD' } } });
     run.budgetUsd = next;
     run.status = 'running';
     this.push(run, { kind: 'you', text: `Raised the budget to $${next.toFixed(2)}` });
