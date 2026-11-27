@@ -1,0 +1,42 @@
+# Liftoff purchase-flow test for {{APP_NAME}} (iOS simulator or Android emulator).
+# iOS: attach a StoreKit configuration file to the scheme so purchases use
+# local test products. Android: use a license-tester account on the device.
+# RevenueCat must point at the sandbox. Run: maestro test .maestro/liftoff-money-path.yaml
+#
+# The app needs these testIDs: signup-email, signup-password, signup-submit,
+# upgrade-button, pro-active, restore-purchases.
+appId: com.example.app # Claude replaces this with the real bundle id
+---
+- launchApp:
+    clearState: true
+- tapOn:
+    id: signup-email
+- inputRandomEmail
+- tapOn:
+    id: signup-password
+- inputText: "Liftoff-test-9!"
+- tapOn:
+    id: signup-submit
+- assertNotVisible:
+    id: pro-active
+- tapOn:
+    id: upgrade-button
+- tapOn: "Subscribe"
+- runFlow:
+    when:
+      visible: "Confirm"
+    commands:
+      - tapOn: "Confirm"
+- extendedWaitUntil:
+    visible:
+      id: pro-active
+    timeout: 60000
+# Restore purchases must bring Pro back on a fresh install.
+- launchApp:
+    clearState: true
+- tapOn:
+    id: restore-purchases
+- extendedWaitUntil:
+    visible:
+      id: pro-active
+    timeout: 60000

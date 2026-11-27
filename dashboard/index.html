@@ -129,7 +129,9 @@
   .task .t { flex: 1; min-width: 0; }
   .task .t .title { color: var(--ink); }
   .task.done .t .title { color: var(--faint); text-decoration: line-through; }
-  .task .t .meta { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 12px; color: var(--muted); }
+  .task .t .meta { display: flex; align-items: center; gap: 6px; margin-top: 2px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  .task .t .meta a { color: var(--muted); display: inline-flex; align-items: center; gap: 3px; }
+  .task .t .meta a svg { width: 12px; height: 12px; }
   .task .acts { display: flex; gap: 4px; opacity: .0; transition: opacity .12s; }
   .task:hover .acts, .task:focus-within .acts { opacity: 1; }
   .add { display: flex; gap: 8px; align-items: center; padding: 12px 0 4px; flex-wrap: wrap; }
@@ -215,6 +217,21 @@
   .check .tx { flex: 1; }
   .check input:checked + .tx { color: var(--muted); }
   .check .by { font-size: 11px; color: var(--faint); }
+  .check .why { display: block; font-size: 12px; color: var(--bad); margin-top: 2px; }
+  .next { display: flex; gap: 14px; align-items: flex-start; padding: 16px; }
+  .next .tile { flex: none; }
+  .next h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+  .next p { margin: 2px 0 0; color: var(--ink-2); }
+  .next .grow { flex: 1; min-width: 0; }
+  .next .acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  @media (max-width: 640px) { .next { flex-wrap: wrap; } .next .acts { justify-content: flex-start; width: 100%; } }
+  .next code { font-size: 12px; background: var(--hover); padding: 2px 6px; border-radius: 5px; }
+  .pulse-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; padding: 12px 0 4px; }
+  .pulse-grid .label { font-size: 12px; color: var(--muted); }
+  .pulse-grid .value { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .pulse-grid .delta { font-size: 12px; color: var(--muted); }
+  .pulse-grid .delta.up { color: var(--good); }
+  .pulse-grid .delta.down { color: var(--bad); }
 
   .deploy { display: flex; align-items: center; gap: 12px; padding: 10px 0; }
   .deploy .grow { flex: 1; min-width: 0; }
@@ -509,6 +526,62 @@ function renderAccounts() {
 }
 
 // ---------- one app ----------
+function money(n, cur = 'usd') {
+  if (n === null || n === undefined) return '–';
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur.toUpperCase(), maximumFractionDigits: n >= 1000 ? 0 : 2 }).format(n);
+}
+function pulseTile(label, value, delta, dir) {
+  return h('div', {}, h('div', { class: 'label' }, label), h('div', { class: 'value' }, value),
+    delta ? h('div', { class: 'delta' + (dir ? ` ${dir}` : '') }, delta) : null);
+}
+function pulseCard(app) {
+  const p = app.pulse;
+  const refreshBtn = h('button', { class: 'btn quiet', onclick: (e) => { e.target.disabled = true; mutate(`/api/apps/${app.slug}/pulse`, 'POST'); } }, icon('activity'), 'Refresh');
+  const head = h('div', { class: 'card-head' }, h('h2', {}, 'Pulse'), p ? h('span', { class: 'sub' }, ago(p.at)) : null, h('span', { class: 'end' }, refreshBtn));
+  if (!p) return h('section', { class: 'card' }, head, h('div', { class: 'card-body' }, h('div', { class: 'empty-row' }, 'No numbers yet. Refresh once Stripe or RevenueCat, PostHog and Sentry are connected.')));
+  const tiles = [];
+  const rev = p.revenuecat?.mrr ?? p.stripe?.mrr;
+  const cur = p.revenuecat?.currency || p.stripe?.currency || 'usd';
+  if (rev !== undefined && rev !== null) {
+    const ch = p.change?.mrr;
+    tiles.push(pulseTile('MRR', money(rev, cur), ch !== null && ch !== undefined ? `${ch >= 0 ? '+' : ''}${money(ch, cur)} vs last week` : null, ch > 0 ? 'up' : ch < 0 ? 'down' : null));
+  }
+  const subs = p.revenuecat?.activeSubscriptions ?? p.stripe?.activeSubscriptions;
+  if (subs !== undefined && subs !== null) tiles.push(pulseTile('Subscribers', subs, p.stripe ? `+${p.stripe.newSubscriptions7d} new, −${p.stripe.cancellations7d} cancelled (7d)` : null));
+  if (p.posthog) {
+    const hh = p.posthog;
+    const d = hh.signups7d - hh.signupsPrev7d;
+    tiles.push(pulseTile('Sign-ups (7d)', hh.signups7d, `${d >= 0 ? '+' : ''}${d} vs last week`, d > 0 ? 'up' : d < 0 ? 'down' : null));
+    tiles.push(pulseTile('Paywall → Pro', hh.paywallViews7d ? `${Math.round((hh.upgrades7d / hh.paywallViews7d) * 1000) / 10}%` : '–', `${hh.upgrades7d} of ${hh.paywallViews7d} views`));
+  }
+  if (p.sentry) {
+    const cf = p.sentry.crashFreeSessions;
+    tiles.push(pulseTile('Crash-free', cf !== null && cf !== undefined ? `${Math.round(cf * 1000) / 10}%` : '–', `${p.sentry.newIssues7d} new issues (7d)`, cf !== null && cf < 0.99 ? 'down' : null));
+  }
+  if (p.uptime) tiles.push(pulseTile('Site', p.uptime.up ? 'Up' : 'Down', p.uptime.up ? `${p.uptime.ms} ms` : String(p.uptime.status || p.uptime.error || ''), p.uptime.up ? 'up' : 'down'));
+  if (p.stripe?.failedPayments7d) tiles.push(pulseTile('Failed payments (7d)', p.stripe.failedPayments7d, null, 'down'));
+  const errs = Object.entries(p.errors || {});
+  return h('section', { class: 'card' }, head, h('div', { class: 'card-body' },
+    tiles.length ? h('div', { class: 'pulse-grid' }, tiles) : h('div', { class: 'empty-row' }, 'No sources answered.'),
+    errs.length ? h('div', { class: 'small' }, errs.map(([k, v]) => `${k}: ${v}`).join(' · ')) : null));
+}
+function nextCard(app) {
+  const a = app.nextAction;
+  if (!a) return null;
+  const cmd = a.command && a.command.startsWith('/') ? a.command : null;
+  return h('section', { class: 'card next' },
+    h('span', { class: 'tile' }, icon('flag')),
+    h('div', { class: 'grow' },
+      h('div', { class: 'small' }, 'Do this next'),
+      h('h2', {}, a.title),
+      h('p', {}, a.why),
+      h('p', {}, a.do)),
+    h('div', { class: 'acts' },
+      a.url ? h('a', { class: 'btn', href: a.url, target: '_blank', rel: 'noopener' }, 'Open', icon('external')) : null,
+      a.taskId ? h('button', { class: 'btn', onclick: () => mutate(`/api/apps/${app.slug}/tasks/${a.taskId}`, 'POST', { done: true }) }, 'Mark done') : null,
+      cmd ? h('button', { class: 'btn', onclick: () => copy(cmd) }, icon('copy'), cmd) : null));
+}
+
 function taskRow(app, t, showApp) {
   const url = `/api/apps/${app.slug}/tasks/${t.id}`;
   return h('div', { class: 'task' + (t.done ? ' done' : '') },
@@ -516,9 +589,11 @@ function taskRow(app, t, showApp) {
       onclick: () => mutate(url, 'POST', { done: !t.done }) }, icon('check')),
     h('div', { class: 't' },
       h('div', { class: 'title' }, t.title),
-      (showApp || (t.blocksRelease && !t.done)) ? h('div', { class: 'meta' },
+      (showApp || (t.blocksRelease && !t.done) || (t.leadTime && !t.done)) ? h('div', { class: 'meta' },
         showApp ? [h('span', { class: 'avatar', style: { width: '14px', height: '14px', fontSize: '9px', borderRadius: '4px', background: colorFor(app.slug) } }, app.name[0]), h('span', {}, app.name)] : null,
-        t.blocksRelease && !t.done ? h('span', { class: 'pill bad sm' }, 'Blocks release') : null) : null),
+        t.blocksRelease && !t.done ? h('span', { class: 'pill bad sm' }, 'Blocks release') : null,
+        t.leadTime && !t.done ? h('span', { class: 'pill warn sm' }, `Takes ${t.leadTime}`) : null,
+        t.url && !t.done ? h('a', { href: t.url, target: '_blank', rel: 'noopener' }, 'Start', icon('external')) : null) : null),
     h('div', { class: 'acts' },
       !t.done ? h('button', { class: 'btn', onclick: () => mutate(url, 'POST', { done: true }) }, 'Mark done') : null,
       t.done ? h('button', { class: 'btn quiet icon-only', title: 'Remove', 'aria-label': 'Remove task', onclick: () => mutate(url, 'DELETE') }, icon('trash')) : null));
@@ -552,6 +627,8 @@ function renderApp(app) {
         h('div', { class: 'fact' }, h('div', { class: 'label' }, 'Readiness checks'), h('div', { class: 'value' }, app.checksDone, h('small', {}, ` / ${app.checksTotal}`))),
         h('div', { class: 'fact' }, h('div', { class: 'label' }, 'Blocking release'), h('div', { class: 'value' + (app.blockingTasks ? ' bad' : '') }, app.blockingTasks)))),
 
+    nextCard(app),
+
     h('section', { class: 'card' },
       h('div', { class: 'card-head' }, h('h2', {}, 'Launch steps'), h('span', { class: 'count' }, `${app.stepsDone}/${app.stepsTotal}`),
         h('span', { class: 'end sub' }, 'Claude runs these during onboarding')),
@@ -559,7 +636,9 @@ function renderApp(app) {
         const st = s.status || 'todo';
         return h('div', { class: 'step ' + st, title: s.note || STEP_WORD[st] },
           h('div', { class: 'lbl' }, icon(STEP_ICON[st]), h('span', {}, s.label)),
-          h('div', { class: 'note' }, s.note || (s.provider ? `${STEP_WORD[st]} · ${s.provider}` : STEP_WORD[st])));
+          h('div', { class: 'note' }, s.stale ? 'Stalled: run it again'
+            : st === 'todo' && s.waitingOn?.length ? `Waits on ${s.waitingOn.map((id) => app.steps.find((x) => x.id === id)?.label || id).join(', ')}`
+            : s.note || (s.provider ? `${STEP_WORD[st]} · ${s.provider}` : STEP_WORD[st])));
       }))),
 
     h('div', { class: 'cols' },
@@ -577,7 +656,9 @@ function renderApp(app) {
 
         h('section', { class: 'card' },
           h('div', { class: 'card-head' }, h('h2', {}, 'Release readiness'), h('span', { class: 'count' }, `${app.checksDone}/${app.checksTotal}`),
-            h('span', { class: 'end sub' }, 'Tick what you have handled')),
+            h('span', { class: 'end' },
+              h('span', { class: 'sub' }, app.lastVerifiedAt ? `Verified ${ago(app.lastVerifiedAt)}` : 'Not verified yet'),
+              h('button', { class: 'btn', title: 'Check against the live site and connected services', onclick: (e) => { e.target.disabled = true; toast('Checking the live site and services…'); mutate(`/api/apps/${app.slug}/verify`, 'POST'); } }, icon('checkCircle'), 'Verify'))),
           cats.map((cat) => {
             const items = app.checklist.filter((c) => c.category === cat);
             const done = items.filter((c) => c.done).length;
@@ -589,11 +670,12 @@ function renderApp(app) {
                 h('span', { class: 'frac' + (done === items.length ? ' full' : '') }, done === items.length ? 'Complete' : `${done} of ${items.length}`)),
               h('div', { class: 'items' }, items.map((c) => h('label', { class: 'check' },
                 h('input', { type: 'checkbox', checked: c.done, onchange: (e) => mutate(`/api/apps/${app.slug}/checklist/${c.id}`, 'POST', { done: e.target.checked }) }),
-                h('span', { class: 'tx' }, c.title),
-                c.done && c.by ? h('span', { class: 'by' }, `by ${c.by}`) : null))));
+                h('span', { class: 'tx' }, c.title, c.verify?.ok === false ? h('span', { class: 'why' }, c.verify.detail) : null),
+                c.done && c.by ? h('span', { class: 'by' }, c.by === 'verified' ? 'verified' : `by ${c.by}`) : null))));
           }))),
 
       h('div', { class: 'stack' },
+        pulseCard(app),
         h('section', { class: 'card' },
           h('div', { class: 'card-head' }, h('h2', {}, 'Deployments')),
           h('div', { class: 'card-body' },
@@ -625,7 +707,7 @@ function render() {
   renderNav();
   renderTopbar(app);
   const view = state.view === 'app' ? renderApp(app) : state.view === 'accounts' ? renderAccounts() : renderOverview();
-  $('main').replaceChildren(...[view].flat());
+  $('main').replaceChildren(...[view].flat().filter(Boolean));
   document.title = state.view === 'app' ? `${app.name} · Mission Control` : 'Mission Control';
 }
 

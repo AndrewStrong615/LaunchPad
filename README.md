@@ -5,17 +5,25 @@ A Claude Code plugin that launches your app from one command, then tracks every 
 ```
 > /liftoff:onboard
   ✓ Reading your app            Fernweh · Expo (iOS, Android, Web)
-  ✓ Payments + paywall          Stripe on web, RevenueCat on mobile
-  ✓ Hosting + domain            Vercel (or Cloudflare)
-  ✓ Analytics + crashes         PostHog + Sentry
+  ! Start now                   Apple Paid Apps Agreement (1–3 days), Play closed test (14 days)…
+  ✓ Database + sign-in          Supabase, Sign in with Apple, account deletion
+  ✓ Hosting + domain            Vercel (or Cloudflare)            verified: https, DNS, redirects
+  ✓ Payments + paywall          Stripe on web, RevenueCat on mobile  verified: webhook rejects unsigned calls
+  ✓ Email                       welcome, receipts, resets          verified: SPF + DKIM
+  ✓ Analytics + crashes         PostHog + Sentry                   verified: events arriving
   ✓ CI/CD on GitHub             build → test → deploy to production
+  ✓ Purchase flow test          buy → Pro unlocks → cancel → Pro locks
+  ✓ Uptime + alerts             health check every 10 minutes
+  ✓ Landing page + growth       email capture, review prompt, launch kit
   ✓ TestFlight build            Play testing build
-  ✓ Landing page                with privacy + terms pages
-  ✓ Store checks                screenshots, age rating, account deletion, review notes…
+  ✓ Store checks + listing      rejection pre-scan, listing uploaded, stops before Submit
   Ready for users ✓
+  Next: Start the slow paperwork now. "Sign the Paid Apps Agreement…" usually takes 1–3 days.
 ```
 
-Claude does the work itself. You only step in for things a person has to do (create an account, pay a store fee, approve anything involving money, DNS or a store submission), and those land in your task list, release blockers first.
+Claude does the work itself. You only step in for things a person has to do (create an account, pay a store fee, approve anything involving money, DNS or a store submission), and those land in your task list, release blockers first. Paperwork with long lead times goes on that list on day one, so it runs while Claude builds.
+
+Liftoff doesn't trust its own ticks: `liftoff verify` checks the live site, DNS, the Stripe webhook, Sentry, PostHog, CI, Supabase row-level security and the shipped code for leaked keys, and unticks anything that isn't true. After launch, `/liftoff:pulse` pulls revenue, sign-ups, conversion, crashes and uptime from the accounts you already connected, and recommends one next action.
 
 ## Install
 
@@ -34,31 +42,45 @@ Requires Node 18+. No npm dependencies.
 | `/liftoff:dashboard` | Starts Mission Control at http://localhost:4747. |
 | `/liftoff:status [all\|app]` | Progress for this app or all of them. |
 | `/liftoff:connect [account]` | Connect a service account once. |
+| `/liftoff:verify [checks]` | Check the launch against the real services, plus the App Store pre-scan. |
+| `/liftoff:go-live` | Switch payments to live safely: checks, live products and webhook, one real purchase and refund with your yes. |
+| `/liftoff:pulse` | Live numbers (MRR, subscribers, sign-ups, paywall conversion, crash-free, uptime) and the next action. |
+| `/liftoff:undo <step>` | Show what a step changed, revert it with your approval, reset the step. |
 
 ## Launch steps
 
-Picked per app from the platforms it ships to (web, iOS, Android). Each step has a skill in `skills/` that tells Claude exactly how to do it.
+Picked per app from the platforms it ships to (web, iOS, Android), and run in dependency order (payments waits for sign-in and the deployed URL its webhook needs; store checks wait for the privacy URL). `liftoff plan --explain` shows the order and what each step does. Each step has a skill in `skills/` that tells Claude exactly how to do it.
 
 | Step | Skill | Provider |
 | --- | --- | --- |
-| Payments, Paywall | `payments` | Stripe (web), RevenueCat (iOS/Android) |
+| Database | `database` | Supabase (or what the app already uses) |
+| Sign-in | `auth` | Supabase Auth (or Clerk, Auth0, NextAuth, Firebase if present) |
 | Hosting + domain | `hosting` | Vercel or Cloudflare (web apps) |
+| Payments, Paywall | `payments` | Stripe (web), RevenueCat (iOS/Android); keeps Lemon Squeezy or Paddle |
+| Email | `email` | Resend, with SPF and DKIM |
 | Analytics | `analytics` | PostHog |
 | Crash reports | `crash-reports` | Sentry |
 | CI/CD | `ci-cd` | GitHub Actions (+ EAS / fastlane for mobile) |
+| Purchase flow test | `money-path-test` | Playwright (web), Maestro (mobile) |
+| Uptime + alerts | `monitoring` | GitHub Actions uptime check, Sentry and Stripe alerts |
 | Landing page | `landing-page` | Built into your app or a small static site |
+| Growth basics | `growth` | Review prompt, feedback, activation event, launch kit |
 | TestFlight build, Play testing | `beta-builds` | App Store Connect, Google Play / Firebase App Distribution |
-| Store checks | `store-readiness` | App Store and Google Play review checklist |
+| Store checks | `store-readiness` | Rejection pre-scan (`liftoff scan`) and review checklist |
+| Store listing | `store-submission` | fastlane deliver / supply; stops before Submit |
+
+Also used on demand: `go-live` (by `/liftoff:go-live`) and `pricing-experiments` (when Pulse shows weak paywall conversion).
 
 ## Accounts: connect once, reuse everywhere
 
 ```
 liftoff accounts                     # what's connected
 liftoff accounts connect stripe      # prompts for the key, hidden
-liftoff exec -- vercel deploy --prod # runs with your stored keys in the environment
+liftoff exec --only vercel -- vercel deploy --prod   # just the Vercel key in its environment
+liftoff accounts migrate             # move keys from credentials.env into the OS keychain
 ```
 
-Keys live in `~/.liftoff/credentials.env` (mode 600), never in your repo or the chat. Every app you onboard afterwards reuses them, so the second app needs no setup.
+Keys live in the OS keychain (macOS Keychain, or the Linux Secret Service via `secret-tool`) when one is available, otherwise in `~/.liftoff/credentials.env` (mode 600); never in your repo or the chat. Set `LIFTOFF_SECRET_STORE=file` or `keychain` to choose. `exec --only` injects only the named accounts' keys, so a command can't read keys it doesn't need. Every app you onboard afterwards reuses them, so the second app needs no setup.
 
 ## Mission Control
 
@@ -69,10 +91,23 @@ Keys live in `~/.liftoff/credentials.env` (mode 600), never in your repo or the 
 - **Status** per app: live URL, deploys (web, TestFlight, Android testers), recent activity.
 - **Release readiness**: about 50 checks across payments, hosting, analytics, builds, landing page, App Store, Google Play and security. Some tick themselves from the repo.
 - **Your accounts**: which services are connected.
+- **Do this next**: one recommended action with the number behind it.
+- **Pulse**: MRR, subscribers, sign-ups, paywall conversion, crash-free sessions and uptime, refreshed on demand.
+- **Verify** button on release readiness: re-checks against the live services and shows why anything failed.
 
 ## The CLI
 
 Slash commands drive `bin/liftoff.mjs`; you can run it yourself too (`node bin/liftoff.mjs help`). State lives in `<your app>/.liftoff/state.json` (add `.liftoff/` to the app's `.gitignore` if you don't want it committed) and the list of apps in `~/.liftoff/projects.json`. Set `LIFTOFF_HOME` to move the shared folder.
+
+## Settings that verify and Pulse read
+
+```
+liftoff set sentry.org acme          liftoff set posthog.project 12345
+liftoff set sentry.project fernweh   liftoff set supabase.ref abcd1234
+liftoff settings                     # all of them
+```
+
+The skills set these as they go. `liftoff costs` estimates monthly costs for the services an app uses (approximate list prices, with warnings such as Vercel Hobby not allowing commercial use).
 
 ## Develop
 

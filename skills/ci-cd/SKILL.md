@@ -16,8 +16,10 @@ Mobile, in `.github/workflows/mobile.yml` on tags or manual dispatch:
 - Expo: `expo/expo-github-action` + `eas build --platform all --auto-submit` (`EXPO_TOKEN`). Make sure `eas.json` has a `production` profile with `autoIncrement: true`.
 - Native iOS/Android: fastlane lanes `beta` (TestFlight / Play internal track).
 
-Secrets: set them with `liftoff exec -- gh secret set NAME --body "$NAME"` so the values come from stored credentials and are never printed. Never commit secrets.
+Secrets: set them with `liftoff exec --only github,<account> -- gh secret set NAME --body "$NAME"` so the values come from stored credentials and are never printed. Never commit secrets.
 
-Verify by pushing a branch and watching the run (`gh run watch`). Report the checks (Build, Test, Deploy) with ✓.
+Verify by pushing a branch and watching the run (`gh run watch`), then `liftoff verify --only ci-tests`. Report the checks (Build, Test, Deploy) with ✓.
+
+Once the purchase flow test exists, run it in CI on pull requests against the preview deploy (see the money-path-test skill).
 
 Record: `liftoff step cicd done --provider github-actions`, tick `ci-workflow`, `ci-tests`, `ci-deploy`, `ci-secrets`, `ci-versioning` (mobile).

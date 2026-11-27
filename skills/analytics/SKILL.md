@@ -10,9 +10,12 @@ description: Add product analytics with PostHog (web and mobile), track the key 
 3. Track the funnel that matters for this app, with consistent snake_case names:
    - `signed_up`, `signed_in`
    - the core action (e.g. `trip_created`, `item_added`, `habit_checked`)
+   - `activated`, once per user, when they first get real value (agree the definition with the user)
    - `paywall_viewed`, `upgraded_to_pro` (with `plan`, `price`), `subscription_cancelled` (from the payments webhook, server-side)
 4. `identify(userId, { email, plan })` after sign-in; `reset()` on sign-out.
 5. Respect consent where required (EU): don't capture before consent if the app targets the EU.
-6. Optional: create a dashboard via the PostHog API with live users, events, signups and upgrades.
+6. Save the project so verify and Pulse can read it: `liftoff set posthog.project <id>` and `liftoff set posthog.host https://us.posthog.com` (or eu).
+7. Optional: create a dashboard via the PostHog API with live users, events, signups and upgrades.
+8. After real events flow: `liftoff verify --only ana-events` (checks `signed_up` and `upgraded_to_pro` have arrived).
 
 Record: `liftoff step analytics done --provider posthog`, tick `ana-sdk`, `ana-events`, `ana-identify`.

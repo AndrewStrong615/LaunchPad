@@ -1,0 +1,5 @@
+name: quillnotes
+description: Notes app
+dependencies:
+  flutter:
+    sdk: flutter
