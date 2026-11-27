@@ -136,7 +136,9 @@ test('CLI: step, task, check, deploy and status', () => {
 });
 
 test('Mission Control API lists apps and edits tasks and checks', async () => {
-  const { server, url } = await startServer({ port: 0 });
+  const { server, url: u } = await startServer({ port: 0 });
+  // Node 18's fetch doesn't fall back from ::1 to 127.0.0.1 for "localhost".
+  const url = u.replace('localhost', '127.0.0.1');
   try {
     const apps = await (await fetch(`${url}/api/apps`)).json();
     assert.deepEqual(apps.map((a) => a.slug).sort(), ['fernweh', 'ledger']);

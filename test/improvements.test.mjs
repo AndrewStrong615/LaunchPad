@@ -377,7 +377,9 @@ test('CLI: set, settings, next, costs and undo', () => {
 });
 
 test('Mission Control API includes the next action and costs', async () => {
-  const { server, url } = await startServer({ port: 0 });
+  const { server, url: u } = await startServer({ port: 0 });
+  // Node 18's fetch doesn't fall back from ::1 to 127.0.0.1 for "localhost".
+  const url = u.replace('localhost', '127.0.0.1');
   try {
     const app = await (await fetch(`${url}/api/apps/ledger`)).json();
     assert.ok(app.nextAction.title);
