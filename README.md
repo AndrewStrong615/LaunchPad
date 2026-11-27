@@ -27,7 +27,7 @@ Next: Start the slow paperwork now. ...
 
 Claude does the work. It stops only for what a person has to do: create an account, pay a store fee, or say yes to anything that touches money, DNS or a store submission. Those become tasks, with release blockers on top.
 
-Liftoff doesn't trust its own ticks: `liftoff verify` checks the live site, DNS, the Stripe webhook, Sentry, PostHog, CI, Supabase row-level security and the shipped code for leaked keys, and unticks anything that isn't true. After launch, `/liftoff:pulse` pulls revenue, sign-ups, conversion, crashes and uptime from the accounts you already connected, and recommends one next action.
+Liftoff doesn't trust its own ticks: `liftoff verify` checks the live site, DNS, the Stripe webhook, Sentry, PostHog, CI, Supabase row-level security and the shipped code for leaked keys, and unticks anything that isn't true. For web apps on Stripe, the purchase flow test is proven from Stripe's own records (a paid test Checkout on the app, then a cancellation, with the app's webhook accepting both), so Claude can't tick it by hand. After launch, `/liftoff:pulse` pulls revenue, sign-ups, conversion, crashes and uptime from the accounts you already connected, and recommends one next action.
 
 ## Liftoff Cloud (web app)
 
@@ -112,6 +112,7 @@ Slash commands drive `bin/liftoff.mjs`; you can run it yourself too (`node bin/l
 ```
 liftoff set sentry.org acme          liftoff set posthog.project 12345
 liftoff set sentry.project greenrow   liftoff set supabase.ref abcd1234
+liftoff set preview.url https://greenrow-git-main-me.vercel.app   # where the purchase flow test runs
 liftoff settings                     # all of them
 ```
 
