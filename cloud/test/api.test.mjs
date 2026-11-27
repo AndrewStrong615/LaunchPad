@@ -223,6 +223,8 @@ test('a cloud run: Claude calls Liftoff tools, asks for approval and a choice, a
     await tools.custom('liftoff_record', { step: 'hosting', kind: 'resource', value: 'vercel:project:invoicely' });
     await tools.custom('liftoff_step', { step: 'hosting', status: 'done', provider: 'vercel', note: 'deployed' });
     s.handTick = await tools.custom('liftoff_check', { item: 'host-deploy' });
+    s.purchaseTick = await tools.custom('liftoff_check', { item: 'pay-e2e' });
+    s.preview = await tools.custom('liftoff_set', { key: 'preview.url', value: 'https://invoicely-git-main-me.vercel.app/pricing' });
     s.badSetting = await tools.custom('liftoff_set', { key: 'posthog.host', value: 'https://evil.example' });
     s.verify = await tools.custom('liftoff_verify', { only: ['host-deploy', 'land-page'] });
     s.pr = await tools.custom('open_pull_request', { branch: 'x', title: 't', body: 'b' });
@@ -285,6 +287,9 @@ test('a cloud run: Claude calls Liftoff tools, asks for approval and a choice, a
   assert.match(session.skill.text, /hosting/i);
   assert.equal(session.handTick.isError, true);
   assert.match(session.handTick.text, /liftoff_verify/);
+  assert.equal(session.purchaseTick.isError, true, 'a web app on Stripe has its purchase flow proven by Stripe, not ticked');
+  assert.match(session.purchaseTick.text, /proven from Stripe/);
+  assert.ok(!session.preview.isError, session.preview.text);
   assert.equal(session.badSetting.isError, true);
   assert.match(session.verify.text, /PASS host-deploy/);
   assert.equal(session.pr.isError, true); // uploads have no pull request
@@ -297,6 +302,8 @@ test('a cloud run: Claude calls Liftoff tools, asks for approval and a choice, a
   assert.equal(hosting.status, 'done');
   assert.equal(hosting.provider, 'vercel');
   assert.equal(r.body.liveUrl, site.url);
+  assert.equal(r.body.config['preview.url'], 'https://invoicely-git-main-me.vercel.app');
+  assert.equal(r.body.checklist.find((c) => c.id === 'pay-e2e').done, false);
   assert.equal(r.body.checklist.find((c) => c.id === 'host-deploy').by, 'verified');
   assert.equal(r.body.cloud.run.status, 'finished');
 

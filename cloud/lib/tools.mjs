@@ -9,7 +9,7 @@ import {
 import { STEPS, accountsForStep, checklistFor } from '../../lib/catalog.mjs';
 import { nextAction } from '../../lib/advice.mjs';
 import { renderScaffold, SCAFFOLDS } from '../../lib/scaffold.mjs';
-import { applyVerify, runVerify, VERIFIABLE } from '../../lib/verify.mjs';
+import { applyVerify, purchaseProvenByStripe, runVerify, VERIFIABLE } from '../../lib/verify.mjs';
 import { collectPulse, recordPulse } from '../../lib/pulse.mjs';
 import { walk } from '../../lib/scan.mjs';
 import { ACCOUNT_HOSTS, listUserAccounts, sandboxEnvPlan, userEnv } from './accounts.mjs';
@@ -19,6 +19,15 @@ import { HttpError } from './http.mjs';
 
 // Items the server can prove; they're ticked only by verify or the pre-scan.
 const PROVABLE = new Set([...VERIFIABLE, 'sec-keys']);
+
+// The purchase flow test is proven from Stripe's records for web apps that pay
+// through Stripe. Apps that sell through the stores (or Paddle, Lemon Squeezy)
+// can't be checked that way yet, so Claude still records their test run.
+function isProvable(state, item, stripeConnected) {
+  if (item === 'pay-e2e') return purchaseProvenByStripe(state, { stripeConnected });
+  return PROVABLE.has(item);
+}
+const stripeConnected = (ctx, uid) => listUserAccounts(ctx.store, uid).some((a) => a.id === 'stripe' && a.connected);
 
 const POSTHOG_HOSTS = ACCOUNT_HOSTS.posthog;
 const ID_LIKE = /^[\w.-]{1,100}$/;
@@ -49,6 +58,16 @@ export function validateSetting(key, value) {
     case 'health.path':
       if (!/^\/[\w./~-]{0,200}$/.test(v) || v.includes('..')) bad('use a path like /api/health');
       return v;
+    case 'preview.url': {
+      let u;
+      try {
+        u = new URL(v);
+      } catch {
+        bad('use a URL like https://my-app-git-main.vercel.app');
+      }
+      if (u.protocol !== 'https:' || u.username || u.password) bad('use an https URL without a username or password');
+      return u.origin;
+    }
     case 'email.domain':
       if (!/^(?=.{3,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(v)) bad('use a domain like example.com');
       return v.toLowerCase();
@@ -92,10 +111,10 @@ export function planFor(state, accounts, envPlan) {
   };
 }
 
-function checklistView(state) {
+function checklistView(state, hasStripe) {
   return checklistFor(state.platforms).map((c) => {
     const cur = state.checklist[c.id] || {};
-    return { id: c.id, category: c.category, title: c.title, done: !!cur.done, by: cur.by || undefined, verify: cur.verify ? `${cur.verify.ok === true ? 'pass' : cur.verify.ok === false ? 'FAIL' : 'not checked'}: ${cur.verify.detail}` : undefined, provable: PROVABLE.has(c.id) || undefined };
+    return { id: c.id, category: c.category, title: c.title, done: !!cur.done, by: cur.by || undefined, verify: cur.verify ? `${cur.verify.ok === true ? 'pass' : cur.verify.ok === false ? 'FAIL' : 'not checked'}: ${cur.verify.detail}` : undefined, provable: isProvable(state, c.id, hasStripe) || undefined };
   });
 }
 
@@ -172,13 +191,16 @@ const HANDLERS = {
   },
 
   liftoff_checklist(ctx, run) {
-    return checklistView(ctx.store.loadApp(run.uid, run.slug));
+    return checklistView(ctx.store.loadApp(run.uid, run.slug), stripeConnected(ctx, run.uid));
   },
 
   liftoff_check(ctx, run, input) {
     const item = str(input.item, 60);
     const done = input.done !== false;
-    if (done && PROVABLE.has(item)) throw new Error(`"${item}" is checked against the real service. Prove it with liftoff_verify (only: ["${item}"]) instead.`);
+    if (done && isProvable(ctx.store.loadApp(run.uid, run.slug), item, stripeConnected(ctx, run.uid))) {
+      if (item === 'pay-e2e') throw new Error('"pay-e2e" is proven from Stripe\'s records, not ticked by hand. Get the purchase flow test to run (in CI on the preview deploy), then call liftoff_verify (only: ["pay-e2e"]). It looks in Stripe test mode for the paid Checkout and the cancellation, and checks the app\'s webhook accepted both.');
+      throw new Error(`"${item}" is checked against the real service. Prove it with liftoff_verify (only: ["${item}"]) instead.`);
+    }
     let out;
     ctx.store.updateApp(run.uid, run.slug, (s) => {
       out = setCheck(s, item, done, 'claude');
