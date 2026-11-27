@@ -242,10 +242,16 @@ test('a cloud run: Claude calls Liftoff tools, asks for approval and a choice, a
 
   r = await me.get('/api/me');
   assert.equal(r.body.claude.ok, true);
+  assert.equal(r.body.models.default, 'claude-sonnet-5-5');
+  assert.deepEqual(r.body.models.choices.map((m) => m.id), ['claude-sonnet-5-5', 'claude-opus-5-5']);
   r = await me.post('/api/apps/invoicely/runs', { steps: ['nope'] });
   assert.equal(r.status, 400);
+  r = await me.post('/api/apps/invoicely/runs', { steps: ['hosting'], model: 'claude-mystery-1' });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /Claude Sonnet 5\.5, Claude Opus 5\.5/);
   r = await me.post('/api/apps/invoicely/runs', { steps: ['hosting'], note: 'Use Vercel' });
   assert.equal(r.status, 200, r.text);
+  assert.equal(r.body.model, 'claude-sonnet-5-5');
   const runId = r.body.id;
   assert.match(runId, /^r_/);
   r = await me.post('/api/apps/invoicely/runs', { steps: ['hosting'] });
@@ -296,7 +302,8 @@ test('a cloud run: Claude calls Liftoff tools, asks for approval and a choice, a
 
   // The session got the code, a vault and a budget, and never a real key.
   const create = client.calls.find((c) => c[0] === 'sessions.create')[1];
-  assert.equal(create.agent, 'agent_test');
+  // Sonnet by default, with the agent's prompt and tools.
+  assert.deepEqual(create.agent, { type: 'agent_with_overrides', id: 'agent_test', model: { id: 'claude-sonnet-5-5', effort: 'high' } });
   assert.equal(create.environment_id, 'env_test');
   assert.equal(create.resources[0].type, 'file');
   assert.equal(create.resources[0].mount_path, '/app.zip');
@@ -383,9 +390,10 @@ test('GitHub runs push a branch, open a pull request and copy keys to CI after a
   await call('POST', '/api/import/github', { url: 'https://github.com/acme/shop' });
   await call('POST', '/api/accounts/stripe', { values: { STRIPE_SECRET_KEY: 'sk_test_ci' } });
   await call('POST', '/api/accounts/vercel', { values: { VERCEL_TOKEN: 'vercel_tok' } });
-  r = await call('POST', '/api/apps/invoicely/runs', { steps: ['cicd'] });
+  r = await call('POST', '/api/apps/invoicely/runs', { steps: ['cicd'], model: 'claude-opus-5-5' });
   assert.equal(r.status, 200);
   assert.equal(r.body.mode, 'github');
+  assert.equal(r.body.model, 'claude-opus-5-5');
   const url = `/api/apps/invoicely/runs/${r.body.id}`;
 
   let run = await until(async () => { const x = (await call('GET', url)).body; return x.pending[0]?.kind === 'secret' && x; });
@@ -408,6 +416,7 @@ test('GitHub runs push a branch, open a pull request and copy keys to CI after a
   assert.deepEqual(run.pr, { number: 7, url: 'https://github.com/acme/shop/pull/7', branch: session.branch });
 
   const create = client.calls.find((c) => c[0] === 'sessions.create')[1];
+  assert.deepEqual(create.agent.model, { id: 'claude-opus-5-5', effort: 'high' });
   assert.deepEqual(create.resources[0], {
     type: 'github_repository',
     url: 'https://github.com/acme/shop',

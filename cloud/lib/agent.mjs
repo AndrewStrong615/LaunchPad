@@ -12,7 +12,14 @@ import { ACCOUNT_HOSTS } from './accounts.mjs';
 
 export const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const SKILLS = fs.readdirSync(path.join(ROOT, 'skills')).filter((d) => fs.existsSync(path.join(ROOT, 'skills', d, 'SKILL.md'))).sort();
-export const MODEL = 'claude-opus-5-5';
+// Models a run can use. Sonnet is the default: strong at setup and coding work
+// for about half the cost. Opus is there for steps that get stuck.
+export const MODELS = [
+  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', hint: 'Fast and about half the cost. Right for most steps.' },
+  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', hint: 'For steps that got stuck or need more care. Costs about twice as much.' },
+];
+export const DEFAULT_MODEL = MODELS[0].id;
+export const EFFORT = 'high';
 export const PROMPT_VERSION = '1';
 
 const obj = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -138,7 +145,7 @@ export function agentDefinition() {
   return {
     name: 'Liftoff Cloud launcher',
     description: "Launches a user's app end to end from the Liftoff web app, using the Liftoff plugin's skills.",
-    model: { id: MODEL, effort: 'high' },
+    model: { id: DEFAULT_MODEL, effort: EFFORT },
     system: SYSTEM_PROMPT,
     tools: [
       {

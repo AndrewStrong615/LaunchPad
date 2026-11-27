@@ -16,18 +16,20 @@ It lives next to the plugin and reuses it: the same detection, launch steps, rea
 - **Mission Control** for every app: launch steps, your tasks, release readiness, deploys, Pulse and "do this next", plus where the code came from, what the scan found, and per-app settings.
 - **Accounts** connected once per person and reused by every app. Keys are encrypted at rest (AES-256-GCM) and never sent back to the browser.
 - **Verify and Pulse** run on the server against the live site and the connected services, through a fetch that refuses private and internal addresses.
-- **Cloud runs with Claude.** Pick steps (or all that are left), add a note, start. Claude works in its own sandbox with a copy of the code and follows the plugin's skills. The run page shows what it's doing live; questions and approval requests appear as cards. GitHub apps get a branch and a draft pull request. Zips get a patch and an updated zip to download.
+- **Cloud runs with Claude.** Pick steps (or all that are left), pick a model, add a note, start. Claude works in its own sandbox with a copy of the code and follows the plugin's skills. The run page shows what it's doing live; questions and approval requests appear as cards. GitHub apps get a branch and a draft pull request. Zips get a patch and an updated zip to download.
 
 ## How a run works
 
 Runs use [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview): Anthropic runs the agent loop and a fresh sandbox per run, so people's code never runs on this server.
 
+- **Model**: runs use Claude Sonnet 5.5 by default, which handles this setup and coding work well for about half the cost of Opus. People can pick Claude Opus 5.5 when they start a run, and a finished or failed run offers "Try again with Opus" for the same steps. Both run at high effort. The choices are `MODELS` in `lib/agent.mjs`.
 - **Code**: GitHub apps are mounted as a repository with the user's GitHub token, which also lets Claude push its branch. Zips are uploaded as a file.
 - **Keys**: each person's connected accounts are copied into their own Anthropic vault as credentials limited to that service's API host (for example `STRIPE_SECRET_KEY` only for `api.stripe.com`). The sandbox sees placeholders; the real key is swapped in only on the way to that host. Signing keys (App Store Connect, Google Play) never enter the sandbox: Claude asks to copy them into GitHub Actions secrets, the server does it directly, and only after the user approves it in the browser.
 - **Network**: the sandbox can reach package registries, GitHub and the connected services' APIs, nothing else. Web search and fetch are off.
 - **Liftoff tools**: Claude reads the plan, skills and templates and records steps, tasks, checks, deploys and settings through tools this server carries out (`liftoff_plan`, `liftoff_step`, `liftoff_verify`, …), so Mission Control updates as it works and checks that need real keys run here. Checklist items the server can prove can only be ticked by `verify`.
 - **Asking first**: Claude asks (`ask_user`) before anything that spends money, changes DNS, goes live, submits to a store or deletes something. Commands the sandbox's safety check is unsure about wait for an Allow or Decline.
-- **Budget**: every run has a spending cap (`LIFTOFF_RUN_BUDGET_USD`, default $15). A run that reaches it pauses, and the user can add $10 and continue.
+- **Budget**: every run has a spending cap (`LIFTOFF_RUN_BUDGET_USD`, default $15). A run that reaches it pauses, and the user can add $10 and continue. The run page shows what each run cost.
+- **What runs cost** (rough, before real usage data): on Sonnet 5.5, about $0.50 to $2.50 for one step and $10 to $30 for a full launch; Opus 5.5 costs about twice that. Scans, Mission Control, verify and Pulse don't use Claude.
 - **Restarts**: run state is saved after every event. After a restart the server picks each run up where it left off, handling each event once.
 
 The agent's prompt and tools are in `lib/agent.mjs`. The server creates the agent and its environment on first start and updates them when that file changes (ids are kept in `<data>/agent.json`).
@@ -44,7 +46,7 @@ Open `http://localhost:8787` (not 127.0.0.1: the address must match `PUBLIC_URL`
 
 ```
 ANTHROPIC_API_KEY=sk-ant-... npm run dev      # cloud runs too
-npm test                                      # 17 tests, no network needed
+npm test                                      # 18 tests, no network needed
 ```
 
 ## Deploy on Render
@@ -70,6 +72,7 @@ The blueprint uses the Starter instance because Render disks need a paid instanc
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | GitHub sign-in (scopes `repo read:user`, to import private repos, push branches and open pull requests). |
 | `LIFTOFF_DEV_LOGIN=1` | One-click local sign-in. Ignored when `NODE_ENV=production`. |
 | `LIFTOFF_RUN_BUDGET_USD` | Spending cap per run (default 15). |
+| `LIFTOFF_RUN_MODEL` | The model runs use when the person doesn't pick one: `claude-sonnet-5-5` (default) or `claude-opus-5-5`. |
 | `LIFTOFF_MAX_ACTIVE_RUNS` | Runs one person can have going at once (default 3). |
 | `LIFTOFF_MAX_UPLOAD_MB`, `LIFTOFF_MAX_SOURCE_MB`, `LIFTOFF_MAX_SOURCE_FILES` | Limits for uploads and unpacked code (50 MB, 200 MB, 40,000 files). |
 | `LIFTOFF_EXTRA_HOSTS` | More hosts the sandbox may reach, comma-separated. |

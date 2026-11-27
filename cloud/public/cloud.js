@@ -23,7 +23,10 @@
   const RUN_TONE = { starting: 'run', running: 'run', 'needs-you': 'warn', finished: 'good', stopped: '', budget: 'warn', failed: 'bad' };
 
   // Cloud-only state.
-  const C = { me: null, slug: null, run: null, runs: null, pick: {}, feedTop: null, stick: true, busy: false, repos: null, note: '', draft: '', loading: false };
+  const C = { me: null, slug: null, run: null, runs: null, pick: {}, feedTop: null, stick: true, busy: false, repos: null, note: '', draft: '', loading: false, model: null };
+  const models = () => C.me?.models?.choices || [];
+  const modelLabel = (id) => models().find((m) => m.id === id)?.label || id;
+  const STRONGEST = 'claude-opus-5-5';
   try {
     const saved = JSON.parse(sessionStorage.getItem('lc-run') || 'null');
     if (saved) Object.assign(C, { slug: saved.slug, runId: saved.runId });
@@ -287,15 +290,15 @@
     const note = h('textarea', { class: 'in', oninput: (e) => { C.note = e.target.value; }, placeholder: 'Anything Claude should know? e.g. "Use Cloudflare, not Vercel" or "Price Pro at $8/month"', 'aria-label': 'Note for Claude', maxlength: '1000' });
     const start = h('button', { class: 'btn primary big', type: 'button', disabled: !C.me?.claude.ok || !chosen.length }, icon('sparkle'), chosen.length === steps.filter((s) => !['done', 'skipped'].includes(s.status)).length ? 'Start the launch' : `Run ${chosen.length} step${chosen.length === 1 ? '' : 's'}`);
     start.onclick = () => busy(start, async () => {
-      const run = await post(`/api/apps/${app.slug}/runs`, { steps: chosen.map((s) => s.id), note: note.value });
-      C.runId = run.id;
-      C.run = run;
-      C.runs = null;
+      await startRun(app.slug, { steps: chosen.map((s) => s.id), note: note.value, model: picked });
       C.note = '';
-      remember();
-      await refresh(true);
     });
     note.value = C.note || '';
+    const picked = models().some((m) => m.id === C.model) ? C.model : C.me?.models?.default;
+    const modelField = models().length > 1 ? h('div', { class: 'field' }, h('span', {}, 'Model'),
+      h('div', { class: 'picker', role: 'radiogroup', 'aria-label': 'Model' }, models().map((m) => h('label', { class: 'pick' },
+        h('input', { type: 'radio', name: 'run-model', value: m.id, checked: m.id === picked, onchange: () => { C.model = m.id; render(); } }),
+        h('span', { class: 't' }, h('b', {}, m.label, m.id === C.me.models.default ? h('span', { class: 'hint' }, ' (default)') : null), h('span', { class: 'small' }, m.hint)))))) : null;
     const mode = app.cloud?.source?.type === 'github' && C.me?.github.token ? 'github' : 'upload';
     return h('section', { class: 'card' },
       h('div', { class: 'card-head' }, h('h2', {}, 'Start a run'), h('span', { class: 'end sub' }, `Budget ${usd(C.me?.limits.runBudgetUsd)} per run`)),
@@ -314,8 +317,18 @@
             h('input', { type: 'checkbox', checked: !!C.pick[s.id], onchange: (e) => { C.pick[s.id] = e.target.checked; render(); } }),
             h('span', { class: 't' }, h('b', {}, s.label), h('span', { class: 'small' }, done ? MC.STEP_WORD[s.status] : s.waitingOn?.length ? `Waits on ${s.waitingOn.map((id) => steps.find((x) => x.id === id)?.label || id).join(', ')}` : s.note || 'Not started')));
         })),
+        modelField,
         h('label', { class: 'field' }, h('span', {}, 'Note for Claude ', h('span', { class: 'hint' }, '(optional)')), note),
         h('div', { class: 'row' }, start, h('button', { class: 'btn quiet', type: 'button', onclick: () => { for (const s of steps) C.pick[s.id] = false; render(); } }, 'Clear'))));
+  }
+
+  async function startRun(slug, body) {
+    const run = await post(`/api/apps/${slug}/runs`, body);
+    C.runId = run.id;
+    C.run = run;
+    C.runs = null;
+    remember();
+    await refresh(true);
   }
 
   function pendingCard(run) {
@@ -379,10 +392,13 @@
       h('div', { class: 'run-head' }, MC.avatar(app, true), h('h1', {}, app.name), run ? runPill(run.status) : null,
         h('span', { class: 'end' },
           run && LIVE.has(run.status) ? h('button', { class: 'btn', onclick: (e) => busy(e.currentTarget, async () => { C.run = await post(`/api/apps/${C.slug}/runs/${run.id}/stop`); render(); }) }, icon('stop'), 'Stop') : null,
+          run && !OPEN.has(run.status) && run.model !== STRONGEST && models().some((m) => m.id === STRONGEST) && C.me?.claude.ok
+            ? h('button', { class: 'btn', title: 'Start a new run for the same steps on Claude Opus 5.5', onclick: (e) => busy(e.currentTarget, () => startRun(C.slug, { steps: run.steps, note: run.note || '', model: STRONGEST })) }, icon('sparkle'), 'Try again with Opus') : null,
           run && !OPEN.has(run.status) ? h('button', { class: 'btn', onclick: () => { C.runId = null; C.run = null; C.pick = {}; remember(); render(); } }, icon('plus'), 'New run') : null,
           h('button', { class: 'btn quiet', onclick: () => go('app', app.slug) }, 'Mission Control', icon('arrow')))),
       run ? h('div', { class: 'run-meta', style: { marginTop: '8px' } },
         h('span', {}, `Started ${ago(run.createdAt)}`),
+        run.model ? h('span', {}, modelLabel(run.model)) : null,
         h('span', {}, run.cost === null ? `Budget ${usd(run.budgetUsd)}` : `${usd(run.cost)} of ${usd(run.budgetUsd)} budget`),
         run.steps.length ? h('span', {}, run.steps.map((id) => app.steps.find((s) => s.id === id)?.label || id).join(', ')) : h('span', {}, 'All remaining steps'),
         run.pr ? h('a', { href: run.pr.url, target: '_blank', rel: 'noopener' }, icon('pr'), `Pull request #${run.pr.number}`) : null) : null));

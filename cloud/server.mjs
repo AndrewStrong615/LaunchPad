@@ -63,7 +63,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const ready = ctx.runs.readiness();
   console.log(`Liftoff Cloud on ${config.publicUrl} (listening on ${config.host}:${config.port})`);
   console.log(`  sign-in: ${ctx.github.oauthEnabled ? 'GitHub' : 'GitHub not set up'}${config.devLogin ? ' + local dev login' : ''}`);
-  console.log(`  cloud runs: ${ready.ok ? `ready${resumed ? `, following ${resumed} run(s)` : ''}` : ready.why}`);
+  console.log(`  cloud runs: ${ready.ok ? `ready on ${ctx.runs.defaultModel()}${resumed ? `, following ${resumed} run(s)` : ''}` : ready.why}`);
+  if (config.runModel && config.runModel !== ctx.runs.defaultModel()) console.log(`  LIFTOFF_RUN_MODEL=${config.runModel} isn't one of the models runs can use, so runs default to ${ctx.runs.defaultModel()}`);
   for (const sig of ['SIGTERM', 'SIGINT']) {
     process.once(sig, async () => {
       await stop();
