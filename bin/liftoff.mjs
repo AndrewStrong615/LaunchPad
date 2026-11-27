@@ -12,7 +12,7 @@ import {
   secretStore, setCheck, setConfig, setStep, setTaskDone, summarize, undoPlan, waitingOn,
 } from '../lib/state.mjs';
 import { startServer } from '../lib/server.mjs';
-import { applyVerify, runVerify } from '../lib/verify.mjs';
+import { applyVerify, purchaseProvenByStripe, runVerify } from '../lib/verify.mjs';
 import { applyScan, storeScan, walk } from '../lib/scan.mjs';
 import { collectPulse, recordPulse, revenueOf } from '../lib/pulse.mjs';
 import { nextAction } from '../lib/advice.mjs';
@@ -329,6 +329,10 @@ async function main() {
     }
     case 'check': {
       const s = loadState(dirOf(flags));
+      // A web app's purchase flow is proven from Stripe's records, never by hand.
+      if (args[0] === 'pay-e2e' && !flags.undo && purchaseProvenByStripe(s, { stripeConnected: !!credentialEnv().STRIPE_SECRET_KEY })) {
+        throw new Error('pay-e2e is proven from Stripe, not ticked by hand. Run the purchase flow test, then: liftoff verify --only pay-e2e');
+      }
       setCheck(s, args[0], !flags.undo, flags.by || 'claude');
       saveState(s);
       return out(`${flags.undo ? '○' : '✓'} ${args[0]}`);

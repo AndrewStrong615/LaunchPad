@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'liftoff-imp-'));
@@ -168,6 +168,91 @@ test('verify flags a webhook that accepts unsigned requests and a vercel.app dom
   assert.equal(by['pay-webhook'].ok, false);
   assert.match(by['pay-webhook'].detail, /unsigned/);
   assert.equal(by['host-domain'].ok, false);
+});
+
+// Stripe test mode as the purchase flow test leaves it: a paid Checkout on the
+// app, its subscription cancelled, and the webhook events delivered.
+function stripeRecords({ successUrl = 'https://ledger.app/billing?ok=1', subStatus = 'canceled', paidPending = 0, cancelPending = 0, sessions = null, endpoints = null } = {}) {
+  const created = Math.floor(Date.now() / 1000) - 3600;
+  return fakeFetch({
+    'GET https://api.stripe.com/v1/checkout/sessions': {
+      data: sessions ?? [{ id: 'cs_test_a1b2c3d4e5f6', status: 'complete', payment_status: 'paid', mode: 'subscription', created, success_url: successUrl, subscription: { id: 'sub_9', status: subStatus } }],
+    },
+    'GET https://api.stripe.com/v1/webhook_endpoints': {
+      data: endpoints ?? [{ status: 'enabled', url: 'https://ledger.app/api/stripe/webhook', enabled_events: ['checkout.session.completed', 'customer.subscription.deleted'] }],
+    },
+    'GET https://api.stripe.com/v1/events?type=checkout.session.completed': { data: [{ data: { object: { id: 'cs_test_a1b2c3d4e5f6' } }, pending_webhooks: paidPending }] },
+    'GET https://api.stripe.com/v1/events?type=customer.subscription.deleted': { data: [{ data: { object: { id: 'sub_9' } }, pending_webhooks: cancelPending }] },
+  });
+}
+
+test('verify proves the purchase flow from Stripe: paid, cancelled, webhook took both', async () => {
+  const s = state.loadState(web);
+  s.liveUrl = 'https://ledger.app';
+  const check = async (fetch, env = { STRIPE_SECRET_KEY: 'sk_test_x' }) => (await runVerify(s, { env, only: ['pay-e2e'], fetch }))[0];
+
+  const ok = await check(stripeRecords());
+  assert.equal(ok.ok, true, ok.detail);
+  assert.match(ok.detail, /cs_test_.*paid, cancelled, and your webhook accepted both/);
+  applyVerify(s, [ok]);
+  assert.equal(s.checklist['pay-e2e'].by, 'verified');
+
+  let r = await check(stripeRecords({ subStatus: 'active' }));
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /never cancelled/);
+  r = await check(stripeRecords({ paidPending: 1 }));
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /hasn't accepted checkout\.session\.completed/);
+  r = await check(stripeRecords({ cancelPending: 2 }));
+  assert.match(r.detail, /hasn't accepted customer\.subscription\.deleted/);
+  r = await check(stripeRecords({ endpoints: [] }));
+  assert.match(r.detail, /no enabled Stripe webhook listens/);
+
+  // A purchase on another app sharing the Stripe account doesn't count. Once
+  // proven, an empty 30-day window keeps the earlier proof instead of unticking.
+  r = await check(stripeRecords({ successUrl: 'https://other-app.com/thanks' }));
+  assert.equal(r.ok, null);
+  assert.match(r.detail, /last proven/);
+  s.checklist['pay-e2e'] = { done: false, by: null, at: null };
+  r = await check(stripeRecords({ sessions: [] }));
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /no paid test checkout on ledger\.app/);
+
+  // A Vercel preview of the same project counts once preview.url names it.
+  s.config['preview.url'] = 'https://ledger-git-main-me.vercel.app';
+  r = await check(stripeRecords({ successUrl: 'https://ledger-7fd3k2q-me.vercel.app/billing' }));
+  assert.equal(r.ok, true, r.detail);
+  delete s.config['preview.url'];
+
+  // Live keys never run it, and the last result stands.
+  r = await check(stripeRecords(), { STRIPE_SECRET_KEY: 'sk_live_x' });
+  assert.equal(r.ok, null);
+  assert.match(r.detail, /test mode only/);
+});
+
+test('the purchase flow is server-proven only for web apps that pay through Stripe', async () => {
+  const { purchaseProvenByStripe, sameApp } = await import('../lib/verify.mjs');
+  assert.equal(purchaseProvenByStripe({ platforms: ['web'], steps: {} }, { stripeConnected: true }), true);
+  assert.equal(purchaseProvenByStripe({ platforms: ['web'], steps: {} }, { stripeConnected: false }), false);
+  assert.equal(purchaseProvenByStripe({ platforms: ['web'], steps: { payments: { provider: 'paddle' } } }, { stripeConnected: true }), false);
+  assert.equal(purchaseProvenByStripe({ platforms: ['ios', 'android'], steps: { payments: { provider: 'stripe' } } }, { stripeConnected: true }), false);
+  assert.equal(sameApp('3fa9c1.ledger.pages.dev', 'ledger.pages.dev'), true);
+  assert.equal(sameApp('deploy-preview-4--ledger.netlify.app', 'ledger.netlify.app'), true);
+  assert.equal(sameApp('ledger-abc-me.vercel.app', 'ledger.vercel.app'), true);
+  assert.equal(sameApp('ledgerx.vercel.app', 'ledger.vercel.app'), false);
+  assert.equal(sameApp('ledger-abc-me.vercel.app', 'ledger.app'), false);
+
+  // The CLI refuses a hand tick for a web app on Stripe, and allows it for a mobile app.
+  const shop = makeApp('shopfront', { 'package.json': { name: 'shopfront', dependencies: { next: '15', react: '19', stripe: '17' } } });
+  const st = state.initProject(shop);
+  state.setStep(st, 'payments', 'done', { provider: 'stripe', force: true });
+  state.saveState(st);
+  const r = spawnSync('node', [CLI, 'check', 'pay-e2e', '--dir', shop], { encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /proven from Stripe/);
+  assert.match(execFileSync('node', [CLI, 'check', 'pay-e2e', '--dir', expo]).toString(), /✓ pay-e2e/);
+  const mobile = await runVerify(state.loadState(expo), { env: { STRIPE_SECRET_KEY: 'sk_test_x' }, only: ['pay-e2e'], fetch: stripeRecords() });
+  assert.equal(mobile[0].ok, null, 'a mobile app keeps its own test run');
 });
 
 test('secret scan finds Stripe secret keys and service_role JWTs in client code', () => {

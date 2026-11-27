@@ -1,5 +1,5 @@
 ---
-description: Check the launch against the real services (live site, DNS, HTTPS, Stripe webhook, Sentry, PostHog, CI, database security, leaked keys) and the App Store pre-scan.
+description: Check the launch against the real services (live site, DNS, HTTPS, Stripe webhook and test purchase, Sentry, PostHog, CI, database security, leaked keys) and the App Store pre-scan.
 argument-hint: "[optional: check ids, comma-separated]"
 allowed-tools: Bash
 ---
