@@ -1,11 +1,11 @@
 {
-  "name": "launchpad",
+  "name": "liftoff",
   "owner": { "name": "AndrewStrong615" },
   "plugins": [
     {
       "name": "liftoff",
       "source": "./",
-      "description": "Launch your app from one command, then track every app in Mission Control."
+      "description": "Launch your app from one command, then watch every app on one Flight Board."
     }
   ]
 }

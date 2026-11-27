@@ -6,7 +6,7 @@ allowed-tools: Bash
 
 If $ARGUMENTS is `all`, run `node ${CLAUDE_PLUGIN_ROOT}/bin/liftoff.mjs status --all`. If it names an app, run `node ${CLAUDE_PLUGIN_ROOT}/bin/liftoff.mjs status $ARGUMENTS`. Otherwise run it with no arguments in the current project.
 
-If there is no state yet, say so and suggest `/liftoff:onboard`.
+If there is no state yet, say so and suggest `/liftoff:launch`.
 
 For a single app, also run `node ${CLAUDE_PLUGIN_ROOT}/bin/liftoff.mjs verify` first if it hasn't run today (`lastVerifiedAt` in `status --json`), so the checklist reflects what's actually true, and `pulse` if the app is live.
 

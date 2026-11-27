@@ -3,7 +3,7 @@ name: crash-reports
 description: Add Sentry crash and error reporting with source maps / dSYMs and alerts. Used by the crash reports launch step.
 ---
 
-# Crash reports
+# Crash tracking
 
 1. Install for the stack: `@sentry/nextjs` (run `npx @sentry/wizard@latest -i nextjs`), `@sentry/react`, `@sentry/node`, `@sentry/react-native` (Expo: add the `@sentry/react-native/expo` plugin), `sentry_flutter`, or the native SDKs.
 2. Create the Sentry project via API if needed: `liftoff exec --only sentry -- curl -sS -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" ...`.

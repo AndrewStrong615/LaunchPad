@@ -3,25 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mission Control</title>
-<link rel="stylesheet" href="/mission-control.css">
+<title>Flight Board</title>
+<link rel="stylesheet" href="/board.css">
 </head>
 <body>
 <div class="shell">
   <aside class="side" aria-label="Apps">
-    <div class="brand"><span class="mark" id="brand-mark"></span><span>Mission Control</span></div>
+    <div class="brand"><span class="mark" id="brand-mark"></span><span>Flight Board</span></div>
     <button class="nav" id="nav-overview"></button>
     <button class="nav" id="nav-accounts"></button>
     <div id="nav-extra"></div>
     <div class="nav-label"><span>Apps</span><span id="app-count"></span></div>
     <div id="applist"></div>
-    <div class="foot">Add an app: open it in Claude Code and run <code>/liftoff:onboard</code></div>
+    <div class="foot">Add an app: open it in Claude Code and run <code>/liftoff:launch</code></div>
   </aside>
   <div class="main">
     <div class="topbar" id="topbar"></div>
     <main class="content" id="main"></main>
   </div>
 </div>
-<script src="/mission-control.js"></script>
+<script src="/board.js"></script>
 </body>
 </html>

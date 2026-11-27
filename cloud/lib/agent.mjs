@@ -35,7 +35,7 @@ export const CUSTOM_TOOLS = [
     step: str('Step id from liftoff_plan'),
     status: str('New status', { enum: STEP_STATUSES }),
     provider: str('Provider used, e.g. stripe, vercel'),
-    note: str('One line for Mission Control, e.g. "test mode, webhook verified"'),
+    note: str('One line for the Flight Board, e.g. "test mode, webhook verified"'),
     force: { type: 'boolean', description: 'Override the needs check (explain why in the note)' },
   }, ['step', 'status'])),
   tool('liftoff_task', 'Add a task for the user: something only a person can do (create an account, pay a fee, approve DNS, sign an agreement). Mark tasks that stop a release.', obj({
@@ -45,7 +45,7 @@ export const CUSTOM_TOOLS = [
   }, ['title'])),
   tool('liftoff_checklist', 'The release-readiness checklist: every item with its id, whether it is done and by whom, and the latest verify result.', obj({})),
   tool('liftoff_check', 'Tick (or untick) a readiness item you satisfied. Items liftoff_verify or the pre-scan can check are refused: prove those with liftoff_verify instead.', obj({ item: str('Checklist item id'), done: { type: 'boolean', description: 'Default true' } }, ['item'])),
-  tool('liftoff_record', 'Log what a step changed so it can be undone later: a file path in the repo, or a provider resource like "stripe:product:prod_123", "vercel:project:fernweh", "github:secret:STRIPE_SECRET_KEY".', obj({
+  tool('liftoff_record', 'Log what a step changed so it can be undone later: a file path in the repo, or a provider resource like "stripe:product:prod_123", "vercel:project:greenrow", "github:secret:STRIPE_SECRET_KEY".', obj({
     step: str('Step id'),
     kind: str('file or resource', { enum: ['file', 'resource'] }),
     value: str('Path or provider:kind:id'),
@@ -54,7 +54,7 @@ export const CUSTOM_TOOLS = [
     target: str('vercel, cloudflare, testflight, play-internal, …'),
     platform: str('Platform', { enum: ['web', 'ios', 'android'] }),
     url: str('Live URL (web) or build link'),
-    version: str('Version, e.g. "1.4 (12)"'),
+    version: str('Version, e.g. "2.3 (41)"'),
     status: str('Status', { enum: ['live', 'processing', 'failed'] }),
   }, ['target', 'platform'])),
   tool('liftoff_set', 'Save a setting that verify and Pulse read (Sentry org and project, PostHog project, Supabase ref, email domain, health path…).', obj({
@@ -85,13 +85,13 @@ The user follows along in the Liftoff web app. They see your messages, the comma
 
 ## Where things are
 - The user's code is at the path given in the first message.
-- Liftoff's records (steps, tasks, checklist, deploys, settings) live on the Liftoff server, not in the sandbox. Read and change them only with the liftoff_* tools. Mission Control shows every change live.
+- Liftoff's records (steps, tasks, checklist, deploys, settings) live on the Liftoff server, not in the sandbox. Read and change them only with the liftoff_* tools. The Flight Board shows every change live.
 - Each launch step has a skill. Call liftoff_skill with the step's skill name before you start the step, and follow it.
 
 ## The skills were written for the command line. In the cloud, use these instead:
 - liftoff init → already done: the app was imported and scanned before this run
 - liftoff plan / status / next / costs → liftoff_plan
-- liftoff pulse → not needed here: Mission Control shows Pulse to the user
+- liftoff pulse → not needed here: the Flight Board shows Pulse to the user
 - liftoff step <id> <status> → liftoff_step
 - liftoff task add → liftoff_task
 - liftoff check <item> / liftoff checklist → liftoff_check / liftoff_checklist

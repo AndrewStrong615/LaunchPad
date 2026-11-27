@@ -20,7 +20,7 @@ import { costReport } from '../lib/costs.mjs';
 import { renderScaffold } from '../lib/scaffold.mjs';
 
 
-const HELP = `liftoff: launch your app and track it in Mission Control
+const HELP = `liftoff: launch your app and follow it on the Flight Board
 
   liftoff init [dir]                       read the app, create .liftoff/state.json, register it
   liftoff plan [--explain]                 steps in order, what each waits on, the accounts each needs
@@ -45,7 +45,7 @@ const HELP = `liftoff: launch your app and track it in Mission Control
   liftoff accounts disconnect <id>
   liftoff accounts migrate                 move keys from credentials.env into the OS keychain
   liftoff exec [--only a,b] -- <command...>  run a command with stored keys (only those accounts' with --only)
-  liftoff dashboard [--port 4747]          open Mission Control
+  liftoff dashboard [--port 4810]          open the Flight Board
 
 Options: --dir <path> picks the app (default: current folder).`;
 
@@ -96,7 +96,7 @@ function printStatus(s) {
   for (const c of failed) out(`  ✗ ${c.title}: ${c.verify.detail}`);
   const open = s.tasks.filter((t) => !t.done);
   if (open.length) {
-    out(`Your tasks (${open.length} open, ${s.blockingTasks} blocking release):`);
+    out(`Needs you (${open.length} open, ${s.blockingTasks} blocking release):`);
     for (const t of open) out(`  ${t.blocksRelease ? '!' : '·'} [${t.id}] ${t.title}${t.leadTime ? ` (takes ${t.leadTime}, start now)` : ''}`);
   }
   if (s.pulse) printPulse(s.pulse, '  ');
@@ -191,7 +191,7 @@ async function main() {
       if (flags.all) {
         const all = listProjects().map((p) => summarize(loadState(p.root)));
         if (flags.json) return out(JSON.stringify(all, null, 2));
-        if (!all.length) return out('No apps yet. Run /liftoff:onboard in an app.');
+        if (!all.length) return out('No apps yet. Run /liftoff:launch in an app.');
         for (const s of all) out(`${s.name.padEnd(20)} steps ${s.stepsDone}/${s.stepsTotal}  checks ${s.checksDone}/${s.checksTotal}  to do ${s.openTasks}${s.liveUrl ? `  ${s.liveUrl}` : ''}`);
         return;
       }
@@ -385,9 +385,9 @@ async function main() {
       return;
     }
     case 'dashboard': {
-      const port = Number(flags.port || process.env.LIFTOFF_PORT || 4747);
+      const port = Number(flags.port || process.env.LIFTOFF_PORT || 4810);
       const { url } = await startServer({ port });
-      out(`Mission Control running at ${url}`);
+      out(`Flight Board running at ${url}`);
       return;
     }
     case 'steps':

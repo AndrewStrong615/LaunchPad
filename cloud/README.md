@@ -1,20 +1,20 @@
 # Liftoff Cloud
 
-Liftoff as a web app. People sign in, bring their app (a GitHub repo or a zip), and get the same Mission Control the plugin shows. Then Claude runs the launch steps in a private cloud sandbox, using the plugin's own skills, while they watch, answer questions and approve anything risky from the browser.
+Liftoff as a web app. People sign in, bring their app (a GitHub repo or a zip), and get the same Flight Board the plugin shows. Then Claude runs the launch steps in a private cloud sandbox, using the plugin's own skills, while they watch, answer questions and approve anything risky from the browser.
 
 ```
-Sign in with GitHub ─▶ Add an app ─▶ Mission Control ─▶ Run with Claude ─▶ Pull request
+Sign in with GitHub ─▶ Add an app ─▶ Flight Board ─▶ Run with Claude ─▶ Pull request
                      (repo or zip)   (scan, checklist,   (live activity,     (or a patch
                                       tasks, verify)      approvals)          for zips)
 ```
 
-It lives next to the plugin and reuses it: the same detection, launch steps, readiness checklist, App Store pre-scan, leaked-key scan, `verify`, Pulse, next action and the Mission Control front end (`lib/` and `dashboard/` at the repo root). The plugin keeps working on its own.
+It lives next to the plugin and reuses it: the same detection, launch steps, readiness checklist, App Store pre-scan, leaked-key scan, `verify`, Pulse, next action and the Flight Board front end (`lib/` and `dashboard/` at the repo root). The plugin keeps working on its own.
 
 ## What it does
 
 - **Add an app** from a GitHub link (public, or private once you sign in with GitHub), from a list of your repos, or by uploading a zip. The code is unpacked safely (no `../` paths, no links, size and file limits), read with the plugin's detection, and scanned: App Store pre-scan and leaked keys.
-- **Mission Control** for every app: launch steps, your tasks, release readiness, deploys, Pulse and "do this next", plus where the code came from, what the scan found, and per-app settings.
-- **Accounts** connected once per person and reused by every app. Keys are encrypted at rest (AES-256-GCM) and never sent back to the browser.
+- **The Flight Board** for every app: launch steps, your tasks, release readiness, deploys, Pulse and "do this next", plus where the code came from, what the scan found, and per-app settings.
+- **Accounts**: each person adds a key once and all their apps use it. Keys are encrypted at rest (AES-256-GCM) and never sent back to the browser.
 - **Verify and Pulse** run on the server against the live site and the connected services, through a fetch that refuses private and internal addresses.
 - **Cloud runs with Claude.** Pick steps (or all that are left), pick a model, add a note, start. Claude works in its own sandbox with a copy of the code and follows the plugin's skills. The run page shows what it's doing live; questions and approval requests appear as cards. GitHub apps get a branch and a draft pull request. Zips get a patch and an updated zip to download.
 
@@ -26,10 +26,10 @@ Runs use [Claude Managed Agents](https://platform.claude.com/docs/en/managed-age
 - **Code**: GitHub apps are mounted as a repository with the user's GitHub token, which also lets Claude push its branch. Zips are uploaded as a file.
 - **Keys**: each person's connected accounts are copied into their own Anthropic vault as credentials limited to that service's API host (for example `STRIPE_SECRET_KEY` only for `api.stripe.com`). The sandbox sees placeholders; the real key is swapped in only on the way to that host. Signing keys (App Store Connect, Google Play) never enter the sandbox: Claude asks to copy them into GitHub Actions secrets, the server does it directly, and only after the user approves it in the browser.
 - **Network**: the sandbox can reach package registries, GitHub and the connected services' APIs, nothing else. Web search and fetch are off.
-- **Liftoff tools**: Claude reads the plan, skills and templates and records steps, tasks, checks, deploys and settings through tools this server carries out (`liftoff_plan`, `liftoff_step`, `liftoff_verify`, …), so Mission Control updates as it works and checks that need real keys run here. Checklist items the server can prove can only be ticked by `verify`.
+- **Liftoff tools**: Claude reads the plan, skills and templates and records steps, tasks, checks, deploys and settings through tools this server carries out (`liftoff_plan`, `liftoff_step`, `liftoff_verify`, …), so the Flight Board updates as it works and checks that need real keys run here. Checklist items the server can prove can only be ticked by `verify`.
 - **Asking first**: Claude asks (`ask_user`) before anything that spends money, changes DNS, goes live, submits to a store or deletes something. Commands the sandbox's safety check is unsure about wait for an Allow or Decline.
 - **Budget**: every run has a spending cap (`LIFTOFF_RUN_BUDGET_USD`, default $15). A run that reaches it pauses, and the user can add $10 and continue. The run page shows what each run cost.
-- **What runs cost** (rough, before real usage data): on Sonnet 5.5, about $0.50 to $2.50 for one step and $10 to $30 for a full launch; Opus 5.5 costs about twice that. Scans, Mission Control, verify and Pulse don't use Claude.
+- **What runs cost** (rough, before real usage data): on Sonnet 5.5, about $0.50 to $2.50 for one step and $10 to $30 for a full launch; Opus 5.5 costs about twice that. Scans, the Flight Board, verify and Pulse don't use Claude.
 - **Restarts**: run state is saved after every event. After a restart the server picks each run up where it left off, handling each event once.
 
 The agent's prompt and tools are in `lib/agent.mjs`. The server creates the agent and its environment on first start and updates them when that file changes (ids are kept in `<data>/agent.json`).
@@ -104,6 +104,6 @@ cloud/
     safe-fetch.mjs    fetch that refuses private addresses (verify, Pulse)
     store.mjs         file storage
     crypto.mjs, http.mjs, config.mjs
-  public/             the web app's pages (Mission Control itself is ../dashboard)
+  public/             the web app's pages (the Flight Board itself is ../dashboard)
   test/
 ```

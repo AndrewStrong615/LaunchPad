@@ -1,4 +1,4 @@
-/* Liftoff Cloud additions on top of mission-control.css. */
+/* Liftoff Cloud additions on top of board.css. */
 .btn:disabled { opacity: .5; cursor: default; }
 .btn.big { height: 40px; padding: 0 16px; font-size: 14px; }
 .btn.good { background: var(--good-dot); border-color: var(--good-dot); color: #fff; }
