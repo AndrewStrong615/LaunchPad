@@ -24,6 +24,14 @@ export function loadConfig(env = process.env) {
   }
   if (secret.length < 32) throw new Error('LIFTOFF_CLOUD_SECRET must be at least 32 characters.');
 
+  // Liftoff's test browser (proof/), a private service. Render's blueprint
+  // gives its address as host:port.
+  let proofUrl = (env.LIFTOFF_PROOF_URL || '').trim().replace(/\/+$/, '') || null;
+  if (proofUrl && !/^https?:\/\//.test(proofUrl)) proofUrl = `http://${proofUrl}`;
+  const proofSecret = env.LIFTOFF_PROOF_SECRET || '';
+  // A missing secret turns the test off instead of stopping the whole site.
+  const proofProblem = proofUrl && proofSecret.length < 32 ? 'LIFTOFF_PROOF_URL is set but LIFTOFF_PROOF_SECRET (32+ characters, the same on the test browser) is not' : null;
+
   // Agent and environment ids come from the environment or from `npm run setup`.
   let saved = {};
   try {
@@ -64,6 +72,7 @@ export function loadConfig(env = process.env) {
     maxSourceFiles: Number(env.LIFTOFF_MAX_SOURCE_FILES || 40000),
     // Only for tests and local development: lets verify and Pulse reach private addresses.
     allowPrivateFetch: env.LIFTOFF_ALLOW_PRIVATE_FETCH === '1' && !production,
+    proof: { url: proofProblem ? null : proofUrl, secret: proofProblem || !proofUrl ? null : proofSecret, problem: proofProblem },
     extraHosts: (env.LIFTOFF_EXTRA_HOSTS || '').split(',').map((h) => h.trim()).filter(Boolean),
   };
 }

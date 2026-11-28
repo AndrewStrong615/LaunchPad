@@ -56,7 +56,8 @@ export function validateSetting(key, value) {
       if (!/^[\w.-]{1,100}\/[\w.-]{1,100}$/.test(v)) bad('use owner/name');
       return v;
     case 'health.path':
-      if (!/^\/[\w./~-]{0,200}$/.test(v) || v.includes('..')) bad('use a path like /api/health');
+    case 'signup.path':
+      if (!/^\/[\w./~-]{0,200}$/.test(v) || v.includes('..')) bad(`use a path like ${key === 'signup.path' ? '/signup' : '/api/health'}`);
       return v;
     case 'preview.url': {
       let u;
@@ -119,10 +120,12 @@ function checklistView(state, hasStripe) {
 }
 
 // Server-side verify (and the Flight Board's Verify button).
-export async function verifyApp(ctx, uid, slug, only = null) {
+// `extra` passes check options through, like { checkout } after a purchase test.
+export async function verifyApp(ctx, uid, slug, only = null, extra = {}) {
   const snap = ctx.store.loadApp(uid, slug);
   if (!snap) throw new HttpError(404, 'No such app');
   const results = await runVerify(snap, {
+    ...extra,
     env: userEnv(ctx.store, uid),
     files: walk(snap.root),
     only,
@@ -198,7 +201,7 @@ const HANDLERS = {
     const item = str(input.item, 60);
     const done = input.done !== false;
     if (done && isProvable(ctx.store.loadApp(run.uid, run.slug), item, stripeConnected(ctx, run.uid))) {
-      if (item === 'pay-e2e') throw new Error('"pay-e2e" is proven from Stripe\'s records, not ticked by hand. Get the purchase flow test to run (in CI on the preview deploy), then call liftoff_verify (only: ["pay-e2e"]). It looks in Stripe test mode for the paid Checkout and the cancellation, and checks the app\'s webhook accepted both.');
+      if (item === 'pay-e2e') throw new Error('"pay-e2e" is proven from Stripe\'s records, not ticked by hand. Once the test ids are in the app and a preview that uses Stripe test keys is deployed (preview.url), call liftoff_prove_purchase: Liftoff runs the purchase in a real browser and checks Stripe. If the test already ran in CI, liftoff_verify (only: ["pay-e2e"]) looks in Stripe test mode for that paid Checkout and its cancellation.');
       throw new Error(`"${item}" is checked against the real service. Prove it with liftoff_verify (only: ["${item}"]) instead.`);
     }
     let out;
@@ -246,6 +249,16 @@ const HANDLERS = {
     const only = Array.isArray(input.only) && input.only.length ? input.only.map((x) => str(x, 60)).filter(Boolean) : null;
     const { results } = await verifyApp(ctx, run.uid, run.slug, only);
     return results.map((r) => `${r.ok === true ? 'PASS' : r.ok === false ? 'FAIL' : 'SKIP'} ${r.id}: ${r.detail}`).join('\n') || 'No verifiable items apply.';
+  },
+
+  async liftoff_prove_purchase(ctx, run) {
+    if (!ctx.proof) throw new Error("Liftoff's test browser isn't available on this server.");
+    const rec = await ctx.proof.start(run.uid, run.slug).done;
+    const lines = [`${rec.status.toUpperCase()}: ${rec.detail}`, ...rec.steps.map((s) => `${s.ok ? '✓' : '✗'} ${s.name}: ${s.detail}`)];
+    if (rec.status === 'passed') lines.push('pay-e2e is ticked as verified. Screenshots of each step are on the Flight Board.');
+    if (rec.status === 'failed') lines.push('Fix what failed on your branch, deploy the preview again, then call liftoff_prove_purchase again. Screenshots of each step are on the Flight Board.');
+    if (rec.status === 'error') lines.push("This stopped for a reason outside the app's code. Tell the user what it says; don't change code because of it.");
+    return lines.join('\n');
   },
 
   async open_pull_request(ctx, run, input) {
@@ -322,6 +335,7 @@ export function describeTool(name, input = {}) {
     case 'liftoff_record': return `Recorded ${i.kind} ${i.value}`;
     case 'liftoff_deploy': return `Recorded a ${i.platform} deploy${i.url ? ` at ${i.url}` : ''}`;
     case 'liftoff_set': return `Set ${i.key}`;
+    case 'liftoff_prove_purchase': return "Ran the purchase test in Liftoff's browser";
     case 'liftoff_verify': return `Verified ${Array.isArray(i.only) && i.only.length ? i.only.join(', ') : 'the checklist'} against the live services`;
     case 'open_pull_request': return `Opened a pull request from ${i.branch}`;
     case 'github_set_secret': return `Set GitHub secret ${i.name}`;

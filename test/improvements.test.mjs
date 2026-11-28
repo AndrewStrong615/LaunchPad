@@ -228,6 +228,14 @@ test('verify proves the purchase flow from Stripe: paid, cancelled, webhook took
   r = await check(stripeRecords(), { STRIPE_SECRET_KEY: 'sk_live_x' });
   assert.equal(r.ok, null);
   assert.match(r.detail, /test mode only/);
+
+  // After Liftoff's own test browser ran it, only that checkout counts, wherever it sent the buyer back to.
+  const only = async (checkout, fetch) => (await runVerify(s, { env: { STRIPE_SECRET_KEY: 'sk_test_x' }, only: ['pay-e2e'], fetch, checkout }))[0];
+  r = await only('cs_test_a1b2c3d4e5f6', stripeRecords({ successUrl: 'https://elsewhere.example.com/thanks' }));
+  assert.equal(r.ok, true, r.detail);
+  r = await only('cs_test_zz99', stripeRecords());
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /doesn't list the test checkout cs_test_…zz99 as complete and paid/);
 });
 
 test('the purchase flow is server-proven only for web apps that pay through Stripe', async () => {

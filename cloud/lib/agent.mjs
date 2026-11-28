@@ -20,7 +20,7 @@ export const MODELS = [
 ];
 export const DEFAULT_MODEL = MODELS[0].id;
 export const EFFORT = 'high';
-export const PROMPT_VERSION = '1';
+export const PROMPT_VERSION = '2';
 
 const obj = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
@@ -64,6 +64,7 @@ export const CUSTOM_TOOLS = [
   tool('liftoff_verify', 'Check readiness items against the real services from the Liftoff server: the live URL, HTTPS and redirects, DNS, legal pages, health endpoint, Stripe products and webhook, Sentry, PostHog events, CI runs, Supabase row-level security, SPF/DKIM and leaked secrets in the imported code. Passing items are ticked as verified; failing ones are unticked.', obj({
     only: { type: 'array', items: { type: 'string' }, description: 'Checklist ids to check (default: all that apply)' },
   })),
+  tool('liftoff_prove_purchase', "Run the app's purchase flow test from the Liftoff server, in a real browser: sign up as a new user on preview.url (or the live URL), press Upgrade, pay on Stripe Checkout with the 4242 test card, check Pro unlocks, cancel the subscription in Stripe, and check Pro locks again. Then Stripe's records for that checkout decide pay-e2e. Web apps on Stripe only. Needs the money-path test ids in the deployed app and Stripe test keys on that deploy. Takes a few minutes; you get every step's result.", obj({})),
   tool('ask_user', "Ask the user one question and wait for the answer, which arrives as this tool's result. Use it for any choice only they can make (a domain, a price) and for a yes before spending money, DNS changes, going live, store submission or deleting a provider resource. The user may take hours to answer.", obj({
     question: str('One short question'),
     options: { type: 'array', items: { type: 'string' }, maxItems: 4, description: 'Up to 4 short answers to choose from (the user can also type their own)' },
@@ -99,6 +100,7 @@ The user follows along in the Liftoff web app. They see your messages, the comma
 - liftoff deploy → liftoff_deploy
 - liftoff set → liftoff_set
 - liftoff verify [--only a,b] → liftoff_verify (it runs on the Liftoff server against the live services)
+- running the purchase flow test (money-path-test) → liftoff_prove_purchase, once the test ids are in the app and a preview that uses Stripe test keys is deployed and saved as preview.url
 - liftoff scan → liftoff_plan lists the pre-scan findings for the imported code. After you change code, re-check those findings by reading the code yourself.
 - liftoff scaffold <kind> → liftoff_template, then write the files it returns
 - liftoff exec --only <accounts> -- <command> → run <command> directly with bash (see Keys)
@@ -114,7 +116,7 @@ Connected accounts are environment variables in the sandbox (STRIPE_SECRET_KEY, 
 - Values given as plain text in the first message (like CLOUDFLARE_ACCOUNT_ID) are identifiers, not secrets.
 
 ## Network
-The sandbox reaches package registries, GitHub and the connected services' APIs, and nothing else. You can't open the user's live site from the sandbox: liftoff_verify checks it from the Liftoff server.
+The sandbox reaches package registries, GitHub and the connected services' APIs, and nothing else. You can't open the user's live site from the sandbox: liftoff_verify checks it from the Liftoff server, and liftoff_prove_purchase drives it in Liftoff's own browser.
 
 ## Order and safety
 - Run the steps you were given in the order liftoff_plan lists them. liftoff_step refuses a step whose needs aren't finished: finish or skip those first.

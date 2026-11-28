@@ -34,3 +34,16 @@ jobs:
           cache-dependency-path: cloud/package-lock.json
       - run: npm ci
       - run: npm test
+  proof:
+    # The test browser, in the same Playwright image the Render service builds from.
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --user 1001
+    defaults:
+      run:
+        working-directory: proof
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm test

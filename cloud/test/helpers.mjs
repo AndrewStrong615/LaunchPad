@@ -58,7 +58,7 @@ export function tmpDir(prefix = 'lc-test-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-export async function startTest({ env = {}, fetch, anthropic = null } = {}) {
+export async function startTest({ env = {}, fetch, anthropic = null, safeFetch, proof } = {}) {
   const dataDir = tmpDir();
   const config = loadConfig({
     PORT: '0',
@@ -69,7 +69,7 @@ export async function startTest({ env = {}, fetch, anthropic = null } = {}) {
     ...(anthropic ? { ANTHROPIC_API_KEY: 'test', LIFTOFF_AGENT_ID: 'agent_test', LIFTOFF_ENVIRONMENT_ID: 'env_test' } : {}),
     ...env,
   });
-  const started = await startCloud(config, { anthropic, fetch });
+  const started = await startCloud(config, { anthropic, fetch, safeFetch, proof });
   const port = started.server.address().port;
   // PUBLIC_URL must match the real port for the origin check.
   started.ctx.config.publicUrl = `http://localhost:${port}`;
