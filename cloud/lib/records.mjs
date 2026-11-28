@@ -158,7 +158,8 @@ export class Records {
   // A run started: note the stack and where the app stood.
   begin(run, state) {
     try {
-      const accounts = listUserAccounts(this.ctx.store, run.uid).filter((a) => a.connected).map((a) => a.id).sort();
+      // The user's own services count by what they're for, never by name.
+      const accounts = listUserAccounts(this.ctx.store, run.uid).filter((a) => a.connected).map((a) => (a.custom ? `custom:${a.category}` : a.id)).sort();
       writeJson(this.file(run.id), {
         v: VERSION,
         id: run.id,

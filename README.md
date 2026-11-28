@@ -63,11 +63,11 @@ Picked per app from the platforms it ships to (web, iOS, Android), and run in de
 
 | Step | Skill | Provider |
 | --- | --- | --- |
-| Database | `database` | Supabase (or what the app already uses) |
+| Database | `database` | Supabase (or the Firebase, Neon or other database the app already uses) |
 | Sign-in | `auth` | Supabase Auth (or Clerk, Auth0, NextAuth, Firebase if present) |
-| Deploy and domain | `hosting` | Vercel or Cloudflare (web apps) |
-| Payments, Paywall | `payments` | Stripe (web), RevenueCat (iOS/Android); keeps Lemon Squeezy or Paddle |
-| Email | `email` | Resend, with SPF and DKIM |
+| Deploy and domain | `hosting` | Vercel, Netlify or Cloudflare (web apps) |
+| Payments, Paywall | `payments` | Stripe (web), RevenueCat (iOS/Android); keeps Paddle, Polar or Lemon Squeezy |
+| Email | `email` | Resend (or SendGrid, Postmark), with SPF and DKIM |
 | Analytics | `analytics` | PostHog |
 | Crash tracking | `crash-reports` | Sentry |
 | CI/CD | `ci-cd` | GitHub Actions (+ EAS / fastlane for mobile) |

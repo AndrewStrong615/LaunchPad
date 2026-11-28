@@ -356,13 +356,34 @@ function activity(entries, limit, showApp) {
 }
 
 // ---------- accounts ----------
-function accountRows(accounts) {
-  return h('div', { class: 'rows' }, accounts.filter(Boolean).map((a) => h('div', { class: 'line' },
+// What each service is for, in the order the Accounts page lists them.
+const ACCOUNT_GROUPS = [
+  ['payments', 'Payments'], ['auth', 'Sign-in'], ['database', 'Database'], ['hosting', 'Hosting'], ['email', 'Email'],
+  ['analytics', 'Analytics'], ['crashes', 'Crash tracking'], ['builds', 'Code and builds'], ['stores', 'App stores'], ['other', 'Other'],
+];
+const MODE_WORD = { test: 'Test mode', sandbox: 'Sandbox', live: 'Live' };
+// Under a service's name: what it's for, or when it was connected, which
+// mode its key is in, and whether the service has turned the key down.
+function accountSub(a) {
+  if (!a.connected || a.custom) return h('div', { class: 'small' }, a.note);
+  return h('div', { class: 'small acct-sub' },
+    h('span', {}, `Connected ${a.connectedAt ? ago(a.connectedAt) : ''}`.trim()),
+    a.mode ? h('span', { class: 'pill sm' + (a.mode === 'live' ? ' warn' : '') }, MODE_WORD[a.mode] || a.mode) : null,
+    a.check?.ok === false ? h('span', { class: 'pill sm bad', title: a.check.detail }, 'Key turned down') : null);
+}
+function accountRows(accounts, { grouped = false } = {}) {
+  const row = (a) => h('div', { class: 'line', key: a.id },
     serviceTile(a),
-    h('div', { class: 'grow' }, h('div', { class: 'name' }, a.label), h('div', { class: 'small' }, a.connected ? `Connected ${a.connectedAt ? ago(a.connectedAt) : ''}`.trim() : a.note)),
+    h('div', { class: 'grow' }, h('div', { class: 'name' }, a.label), accountSub(a)),
     hook('accountAction', a) || (a.connected
       ? h('span', { class: 'pill good' }, icon('check'), 'Connected')
-      : h('button', { class: 'btn', title: 'Copy the command that connects it', onclick: () => copy(`liftoff accounts connect ${a.id}`) }, icon('copy'), 'Connect')))));
+      : h('button', { class: 'btn', title: 'Copy the command that connects it', onclick: () => copy(`liftoff accounts connect ${a.id}`) }, icon('copy'), 'Connect')));
+  const list = accounts.filter(Boolean);
+  if (!grouped || !list.some((a) => a.category)) return h('div', { class: 'rows' }, list.map(row));
+  return h('div', { class: 'rows' }, ACCOUNT_GROUPS.map(([id, label]) => {
+    const mine = list.filter((a) => (a.category || 'other') === id);
+    return mine.length ? [h('div', { class: 'group-head', key: `g-${id}` }, label), mine.map(row)] : null;
+  }));
 }
 
 function renderAccounts() {
@@ -376,10 +397,12 @@ function renderAccounts() {
       h('section', { class: 'card' },
         h('div', { class: 'card-head' }, h('h2', {}, 'Not connected'), h('span', { class: 'count' }, rest.length),
           h('span', { class: 'end sub' }, HOOKS.accountAction ? 'Keys are stored encrypted' : 'Connect copies the command')),
-        h('div', { class: 'card-body' }, rest.length ? accountRows(rest) : h('div', { class: 'empty-row' }, icon('checkCircle'), 'Everything is connected.'))),
-      h('section', { class: 'card' },
-        h('div', { class: 'card-head' }, h('h2', {}, 'Connected'), h('span', { class: 'count' }, connected.length)),
-        h('div', { class: 'card-body' }, connected.length ? accountRows(connected) : h('div', { class: 'empty-row' }, 'None yet.')))),
+        h('div', { class: 'card-body' }, rest.length ? accountRows(rest, { grouped: true }) : h('div', { class: 'empty-row' }, icon('checkCircle'), 'Everything is connected.'))),
+      h('div', { class: 'stack' },
+        h('section', { class: 'card' },
+          h('div', { class: 'card-head' }, h('h2', {}, 'Connected'), h('span', { class: 'count' }, connected.length)),
+          h('div', { class: 'card-body' }, connected.length ? accountRows(connected) : h('div', { class: 'empty-row' }, 'None yet.'))),
+        hook('accountsMore'))),
   ];
 }
 

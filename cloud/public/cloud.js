@@ -495,6 +495,7 @@
           h('div', { class: 'grow' }, h('div', { class: 'name' }, a.label), h('div', { class: 'small' }, a.connected ? `Connected ${a.connectedAt ? ago(a.connectedAt) : ''}`.trim() : a.note)),
           accountAction(a))) : h('div', { class: 'empty-row' }, icon('checkCircle'), 'This app doesn’t need any service keys.'))),
       h('p', { class: 'ob-note small' }, icon('clock'), `No keys handy? Skip this. ${ai()} asks for one when a step needs it, and they all live under Accounts.`),
+      h('p', { class: 'ob-note small' }, icon('plus'), `Using something that isn’t listed? `, h('button', { class: 'link', type: 'button', onclick: () => customDialog() }, 'Add your own service'), ` and ${ai()} follows its docs.`),
       obActs(obNext('Continue', () => obGo(3)), obBack(1)),
     ];
   }
@@ -593,7 +594,103 @@
     dlg.showModal();
   }
 
+  // A service Liftoff doesn't list: a name, what it's for, its docs, where its
+  // API answers, and the key. Given `a`, it changes that service (a new key,
+  // or how the key is sent); the name stays.
+  const CATEGORY_CHOICES = [['payments', 'Payments'], ['auth', 'Sign-in'], ['database', 'Database'], ['hosting', 'Hosting'], ['email', 'Email'], ['analytics', 'Analytics'], ['crashes', 'Crash tracking'], ['other', 'Something else']];
+  const SCHEME_CHOICES = [['bearer', 'Bearer token (Authorization: Bearer …)'], ['header', 'A header of its own, like X-API-Key'], ['basic', 'Basic auth, with the key as the password'], ['basic-key', 'Basic auth, with the key as the username'], ['query', 'In the address, like ?api_key=…']];
+  const envName = (name) => `${String(name || 'SERVICE').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'SERVICE'}_API_KEY`;
+
+  function customDialog(a = null) {
+    const auth = a?.auth || { scheme: 'bearer' };
+    const dlg = h('dialog', { class: 'modal wide', 'aria-label': a ? `Change ${a.label}` : 'Add a service Liftoff doesn’t list' });
+    const err = h('div', { class: 'note-box bad', role: 'alert', hidden: true });
+    const field = (label, control, hint, attrs = {}) => h('label', { class: 'field', ...attrs }, h('span', {}, label), control, hint ? h('span', { class: 'hint' }, hint) : null);
+    const select = (name, choices, value) => h('select', { name, class: 'in' }, choices.map(([id, label]) => h('option', { value: id, selected: id === value }, label)));
+    const text = (name, { value = '', placeholder = '', type = 'text', required = false, readonly = false } = {}) => h('input', { name, type, value, placeholder, required, readonly, autocomplete: 'off', spellcheck: 'false' });
+    const keyName = text('keyName', { value: a?.keyName || '', placeholder: envName(a?.label) });
+    // Only the box the chosen way of sending the key needs.
+    const extra = {
+      header: field('Header name', text('header', { value: auth.header || '', placeholder: 'X-API-Key' }), null, { hidden: auth.scheme !== 'header' }),
+      basic: field('Username', text('username', { value: auth.username || '', placeholder: 'api' }), 'What the service’s docs say to send as the username.', { hidden: auth.scheme !== 'basic' }),
+      query: field('Parameter name', text('param', { value: auth.param || '', placeholder: 'api_key' }), null, { hidden: auth.scheme !== 'query' }),
+    };
+    const scheme = select('scheme', SCHEME_CHOICES, auth.scheme);
+    scheme.addEventListener('change', () => {
+      for (const [id, el] of Object.entries(extra)) el.hidden = scheme.value !== id;
+    });
+    const name = text('name', { value: a?.label || '', placeholder: 'Creem', required: true, readonly: !!a });
+    name.addEventListener('input', () => { keyName.placeholder = envName(name.value); });
+    const form = h('form', { onsubmit: (e) => {
+      e.preventDefault();
+      const f = new FormData(e.currentTarget);
+      const body = Object.fromEntries(['name', 'category', 'docs', 'hosts', 'value', 'scheme', 'header', 'username', 'param', 'keyName', 'test'].map((k) => [k, String(f.get(k) || '').trim()]));
+      err.hidden = true;
+      busy(e.submitter, async () => {
+        try {
+          state.accounts = await post('/api/accounts/custom', body);
+        } catch (x) {
+          err.textContent = x.message;
+          err.hidden = false;
+          // A problem with how the key is sent is under More options: show it.
+          if (/header|username|parameter|key name|test address|sent/i.test(x.message)) more.open = true;
+          err.scrollIntoView({ block: 'nearest' });
+          return;
+        }
+        const saved = state.accounts.find((x) => x.custom && x.label.toLowerCase() === body.name.toLowerCase());
+        dlg.close();
+        toast(saved?.check?.ok ? `${body.name} added. The key works.` : `${body.name} added`);
+        await refresh(true);
+      });
+    } },
+    h('div', { class: 'modal-head' }, h('span', { class: 'head-tile' }, icon(a ? 'key' : 'plus')), h('div', {},
+      h('h2', {}, a ? `Change ${a.label}` : 'Add a service Liftoff doesn’t list'),
+      h('p', { class: 'small' }, `${ai()} reads its docs and calls its API through Liftoff, which adds your key to each request. The key is stored encrypted, goes only to the address you give, and never enters ${ai()}’s sandbox.`))),
+    field('Name', name),
+    field('What it’s for', select('category', CATEGORY_CHOICES, a?.category || 'payments')),
+    field('Link to its API docs', text('docs', { value: a?.docs || '', placeholder: 'https://docs.example.com/api', type: 'url', required: true }), `${ai()} starts reading here.`),
+    field('API address', text('hosts', { value: (a?.hosts || []).join(', '), placeholder: 'api.example.com', required: true }), 'Where its API answers. Your key is only ever sent here. Separate more than one with commas.'),
+    field(a ? 'Key (paste it again)' : 'Key', h('input', { name: 'value', type: 'password', autocomplete: 'off', spellcheck: 'false', required: true, placeholder: 'Its secret API key' })),
+    h('details', { class: 'more' },
+      h('summary', {}, icon('chevron'), 'More options'),
+      field('How the key is sent', scheme, 'Most APIs use a bearer token. The docs say which.'),
+      extra.header, extra.basic, extra.query,
+      field('Name in your code', keyName, 'The environment variable your app reads the key from.'),
+      field('Test address', text('test', { value: a?.test || '', placeholder: 'https://api.example.com/v1/me', type: 'url' }), 'Optional. An address that needs the key, like the one that returns your account. Liftoff calls it to check the key works.')),
+    err,
+    h('div', { class: 'acts' }, h('button', { class: 'btn quiet', type: 'button', onclick: () => dlg.close() }, 'Cancel'), h('button', { class: 'btn primary', type: 'submit' }, a ? 'Save' : 'Add service')));
+    const more = form.querySelector('details.more');
+    if (a && auth.scheme !== 'bearer') more.open = true;
+    dlg.append(form);
+    dlg.addEventListener('close', () => dlg.remove());
+    document.body.append(dlg);
+    dlg.showModal();
+  }
+
+  function customAction(a) {
+    const bad = a.check?.ok === false;
+    return h('span', { class: 'row' },
+      bad ? h('span', { class: 'pill bad', title: a.check.detail }, 'Check the key') : null,
+      h('button', { class: 'btn quiet', title: `Change ${a.label}’s key or how it’s sent`, onclick: () => customDialog(a) }, 'Change'),
+      h('button', { class: 'btn quiet', title: `Remove ${a.label}`, onclick: (e) => busy(e.currentTarget, async () => {
+        if (!confirm(`Remove ${a.label}? Its key is deleted from Liftoff Cloud.`)) return;
+        await api(`/api/accounts/${a.id}`, { method: 'DELETE' });
+        await refresh(true);
+      }) }, 'Remove'));
+  }
+
+  // The Accounts page's card for services Liftoff doesn't list.
+  function customCard() {
+    const own = state.accounts.filter((a) => a.custom);
+    return h('section', { class: 'card', key: 'own-services' },
+      h('div', { class: 'card-head' }, h('h2', {}, 'Your own services'), own.length ? h('span', { class: 'count' }, own.length) : null),
+      h('div', { class: 'card-body' },
+        h('p', { class: 'small own-intro' }, `Use something Liftoff doesn’t list? Add it with a link to its API docs. ${ai()} reads the docs and uses it like any other service, and Liftoff adds your key to each call.`),
+        h('button', { class: 'btn', type: 'button', onclick: () => customDialog() }, icon('plus'), 'Add a service')));
+  }
+
   function accountAction(a) {
+    if (a.custom) return customAction(a);
     if (a.connected) {
       return h('span', { class: 'row' },
         h('span', { class: 'pill good' }, icon('check'), 'Connected'),
@@ -1677,6 +1774,7 @@
     overviewIntro: (apps) => `${Board.plural(apps.length, 'app')} in Liftoff Cloud. Here is what needs you first.`,
     overviewActions: () => h('button', { class: 'btn primary', onclick: () => go('add') }, icon('plus'), 'Add an app'),
     accountAction,
+    accountsMore: customCard,
     accountsIntro: () => `Add a key once and all your apps can use it. Keys are encrypted on the server, and ${ai()}’s sandbox only sees placeholders that turn into the real key on the way to that service.`,
     // Checklist items the assistant ticked say so by its name.
     whoTicked: (by) => (by === 'claude' ? ai() : null),

@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
-import { ACCOUNTS, STEPS, accountsFor, accountsForStep, needsFor, stepsFor } from '../lib/catalog.mjs';
+import { ACCOUNTS, STEPS, accountsFor, accountsForStep, needsFor, stepsFor, usesOf } from '../lib/catalog.mjs';
 import {
   CONFIG_KEYS, addDeploy, addTask, connectAccount, credentialEnv, disconnectAccount, findProject, initProject,
   listAccounts, listProjects, loadState, migrateToKeychain, recordChange, removeTask, resetStep, saveState,
@@ -171,12 +171,12 @@ async function main() {
         needs: needsFor(step, s.platforms),
         waitingOn: waitingOn(s, step.id),
         does: step.does,
-        accounts: accountsForStep(step, s.platforms).map((id) => {
+        accounts: accountsForStep(step, s.platforms, usesOf(s)).map((id) => {
           const a = accounts.find((x) => x.id === id);
           return { id, label: a.label, connected: a.connected };
         }),
       }));
-      if (flags.json) return out(JSON.stringify({ app: s.name, platforms: s.platforms, plan, accountsNeeded: accountsFor(s.platforms) }, null, 2));
+      if (flags.json) return out(JSON.stringify({ app: s.name, platforms: s.platforms, plan, accountsNeeded: accountsFor(s.platforms, usesOf(s)) }, null, 2));
       out(`Plan for ${s.name} (${s.platforms.join(', ')}):`);
       for (const p of plan) {
         const acc = p.accounts.map((a) => `${a.label} ${a.connected ? '✓' : '✗'}`).join(', ');

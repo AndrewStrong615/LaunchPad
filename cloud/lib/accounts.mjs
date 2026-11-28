@@ -2,8 +2,9 @@
 // encrypted on this server and mirrored into an Anthropic vault so Claude's
 // sandbox only ever sees placeholders that turn into the real key on the way
 // to that service's API.
-import { ACCOUNTS } from '../../lib/catalog.mjs';
+import { ACCOUNTS, usesOf } from '../../lib/catalog.mjs';
 import { fingerprint } from './crypto.mjs';
+import { listCustomServices } from './custom.mjs';
 
 // API hosts each account's keys may be sent to from Claude's sandbox. These
 // are also the hosts the sandbox can reach (see agent.mjs).
@@ -18,6 +19,14 @@ export const ACCOUNT_HOSTS = {
   github: ['api.github.com', 'uploads.github.com'],
   expo: ['api.expo.dev'],
   resend: ['api.resend.com'],
+  paddle: ['api.paddle.com', 'sandbox-api.paddle.com'],
+  polar: ['api.polar.sh', 'sandbox-api.polar.sh'],
+  lemonsqueezy: ['api.lemonsqueezy.com'],
+  netlify: ['api.netlify.com'],
+  neon: ['console.neon.tech'],
+  clerk: ['api.clerk.com'],
+  sendgrid: ['api.sendgrid.com'],
+  postmark: ['api.postmarkapp.com'],
 };
 
 // Identifiers that aren't secret and are used in URL paths, where vault
@@ -26,7 +35,13 @@ export const PLAIN_ENV = new Set(['CLOUDFLARE_ACCOUNT_ID', 'APP_STORE_CONNECT_KE
 
 // Keys used to sign requests locally (App Store Connect .p8, Google service
 // account JSON) can't work as placeholders; they go to CI as GitHub secrets.
-export const SIGNING_ENV = new Set(['APP_STORE_CONNECT_KEY', 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON']);
+// Firebase's service account key is the same kind of key.
+export const SIGNING_ENV = new Set(['APP_STORE_CONNECT_KEY', 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON', 'FIREBASE_SERVICE_ACCOUNT_JSON']);
+
+// Anthropic vaults hold at most 20 credentials. Every built-in key that goes
+// into the sandbox fits with room to spare (a test keeps it that way); the
+// user's own services never use the vault (see custom.mjs).
+export const VAULT_LIMIT = 20;
 
 const MAX_VALUE = 20000;
 
@@ -79,6 +94,54 @@ const KEY_FORMATS = {
     hint: 'The whole .p8 file',
     check: (v) => (/^-----BEGIN PRIVATE KEY-----[\s\S]+-----END PRIVATE KEY-----$/.test(v) ? null : 'Paste the whole .p8 file, from -----BEGIN PRIVATE KEY----- to -----END PRIVATE KEY-----.'),
   },
+  PADDLE_API_KEY: {
+    hint: 'pdl_sdbx_apikey_… or pdl_live_apikey_…',
+    check: (v) => (/^(test|live)_[A-Za-z0-9]+$/.test(v) && v.length < 40 ? 'That’s a client-side token, which only opens checkouts. Paste an API key (pdl_…) from Developer tools → Authentication.'
+      : /^pdl_(sdbx|live)_apikey_[A-Za-z0-9_]+$/.test(v) || /^[a-f0-9]{40,}$/i.test(v) ? null : 'That isn’t a Paddle API key. Those start with pdl_sdbx_apikey_ or pdl_live_apikey_.'),
+  },
+  POLAR_ACCESS_TOKEN: {
+    hint: 'polar_oat_…',
+    check: (v) => (/^polar_(oat|pat)_[A-Za-z0-9_]+$/.test(v) ? null : 'That isn’t a Polar access token. Organization access tokens start with polar_oat_.'),
+  },
+  LEMONSQUEEZY_API_KEY: {
+    hint: 'eyJ… (a long key)',
+    check: (v) => (/^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(v) ? null : 'That isn’t a Lemon Squeezy API key. Those are long keys starting with eyJ, from Settings → API.'),
+  },
+  NETLIFY_AUTH_TOKEN: {
+    hint: 'nfp_…',
+    check: (v) => (/^nfp_[A-Za-z0-9_]+$/.test(v) || /^[A-Za-z0-9_-]{40,}$/.test(v) ? null : 'That isn’t a Netlify personal access token. New ones start with nfp_.'),
+  },
+  NEON_API_KEY: {
+    hint: 'napi_…',
+    check: (v) => (/^napi_[A-Za-z0-9]+$/.test(v) ? null : 'That isn’t a Neon API key. Those start with napi_ (a database connection string won’t work here).'),
+  },
+  CLERK_SECRET_KEY: {
+    hint: 'sk_test_… or sk_live_…',
+    check: (v) => (/^sk_(test|live)_[A-Za-z0-9]+$/.test(v) ? null
+      : /^pk_/.test(v) ? 'That’s the publishable key (pk_…). Paste the secret key (sk_…) from the same page.'
+        : 'That isn’t a Clerk secret key. Those start with sk_test_ or sk_live_.'),
+  },
+  SENDGRID_API_KEY: {
+    hint: 'SG.…',
+    check: (v) => (/^SG\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(v) ? null : 'That isn’t a SendGrid API key. Those start with SG.'),
+  },
+  POSTMARK_SERVER_TOKEN: {
+    hint: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+    check: (v) => (UUID.test(v) ? null : 'A Postmark server token is a long ID with dashes, from your server’s API Tokens tab.'),
+  },
+  FIREBASE_SERVICE_ACCOUNT_JSON: {
+    hint: 'The whole JSON key file',
+    check: (v) => {
+      let j;
+      try {
+        j = JSON.parse(v);
+      } catch {
+        return 'Paste the whole JSON key file from Project settings → Service accounts → Generate new private key.';
+      }
+      if (j?.apiKey && j?.authDomain) return 'That’s the web app config, which is public. Paste a service account key: Project settings → Service accounts → Generate new private key.';
+      return j?.type === 'service_account' && j.client_email && j.private_key && j.project_id ? null : 'That JSON isn’t a Firebase service account key. Generate one under Project settings → Service accounts.';
+    },
+  },
   GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: {
     hint: 'The whole JSON key file',
     check: (v) => {
@@ -92,7 +155,7 @@ const KEY_FORMATS = {
     },
   },
 };
-const MULTILINE = new Set(['APP_STORE_CONNECT_KEY', 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON']);
+const MULTILINE = new Set(['APP_STORE_CONNECT_KEY', 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON', 'FIREBASE_SERVICE_ACCOUNT_JSON']);
 
 // Why a value can't be this key, or null when it looks right.
 export function keyProblem(name, value) {
@@ -104,39 +167,64 @@ export function keyProblem(name, value) {
 
 export function listUserAccounts(store, uid) {
   const secrets = store.getSecrets(uid);
-  return Object.entries(ACCOUNTS).map(([id, def]) => {
+  const builtIn = Object.entries(ACCOUNTS).map(([id, def]) => {
     const rec = secrets.accounts[id];
     return {
       id,
       label: def.label,
+      category: def.category,
       note: def.note,
       url: def.url,
       fields: def.env,
       hints: Object.fromEntries(def.env.filter((k) => KEY_FORMATS[k]).map((k) => [k, KEY_FORMATS[k].hint])),
-      connected:!!rec && def.env.every((k) => rec.values?.[k]),
+      connected: !!rec && def.env.every((k) => rec.values?.[k]),
       connectedAt: rec?.connectedAt || null,
+      // What the service said when the key was connected (never the key).
+      check: rec?.check || null,
+      mode: rec?.check?.mode || null,
       source: rec?.source || null,
       store: rec ? 'cloud' : null,
     };
   });
+  return [...builtIn, ...listCustomServices(store, uid)];
 }
+
+// Sandbox or live per connected account, as the key check found it.
+export function accountModes(store, uid) {
+  const secrets = store.getSecrets(uid);
+  return Object.fromEntries(Object.entries(secrets.accounts).filter(([, r]) => r.check?.mode).map(([id, r]) => [id, r.check.mode]));
+}
+
+// What an app uses per category, counting the user's own services.
+export function usesFor(store, uid, state) {
+  return usesOf(state, { custom: listCustomServices(store, uid) });
+}
+export const customNames = (store, uid) => Object.fromEntries(listCustomServices(store, uid).map((c) => [c.id, c.name]));
 
 export const stripeConnected = (store, uid) => listUserAccounts(store, uid).some((a) => a.id === 'stripe' && a.connected);
 
-export function connectUserAccount(store, uid, id, values, source = 'you') {
+// The values for an account, trimmed, or a 400 saying what's wrong with them.
+export function cleanAccountValues(id, values) {
   const def = ACCOUNTS[id];
   if (!def) throw Object.assign(new Error(`Unknown account "${id}"`), { status: 404 });
-  const clean = {};
+  const out = {};
   for (const k of def.env) {
     const v = typeof values?.[k] === 'string' ? values[k].trim() : '';
     if (!v) throw Object.assign(new Error(`Enter ${k} for ${def.label}.`), { status: 400 });
     if (v.length > MAX_VALUE) throw Object.assign(new Error(`${k} is too long.`), { status: 400 });
     const problem = keyProblem(k, v);
     if (problem) throw Object.assign(new Error(problem), { status: 400 });
-    clean[k] = store.encrypt(v);
+    out[k] = v;
   }
+  return out;
+}
+
+// `check` is what the service said about the key (key-check.mjs), if asked.
+export function connectUserAccount(store, uid, id, values, source = 'you', check = null) {
+  const plain = cleanAccountValues(id, values);
+  const clean = Object.fromEntries(Object.entries(plain).map(([k, v]) => [k, store.encrypt(v)]));
   const secrets = store.getSecrets(uid);
-  secrets.accounts[id] = { connectedAt: new Date().toISOString(), source, values: clean };
+  secrets.accounts[id] = { connectedAt: new Date().toISOString(), source, values: clean, ...(check ? { check: { ...check, at: new Date().toISOString() } } : {}) };
   store.saveSecrets(uid, secrets);
 }
 

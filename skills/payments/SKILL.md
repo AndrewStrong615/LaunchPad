@@ -1,6 +1,6 @@
 ---
 name: payments
-description: Add payments and a paywall to an app. Stripe Checkout + Billing Portal for web, RevenueCat for iOS/Android subscriptions. Used by the payments and paywall launch steps.
+description: Add payments and a paywall to an app. Stripe Checkout + Billing Portal for web (or the Paddle, Polar or Lemon Squeezy the app already uses), RevenueCat for iOS/Android subscriptions. Used by the payments and paywall launch steps.
 ---
 
 # Payments and paywall
@@ -21,6 +21,14 @@ From reading the app, propose the paid tier (name it "<App> Pro"), what it unloc
 4. Paywall UI: an upgrade screen listing Pro features with yearly preselected, plus a gate component/hook (`usePro()`) that reads the server-side entitlement. Never trust a client flag.
 5. Put `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` and price ids in the host's env vars, not the repo.
 
+## Web, when the app sells through Paddle, Polar or Lemon Squeezy
+These are merchants of record: they collect and file sales tax for the user, for a bigger cut. If the app already uses one (`payments:` in `liftoff status --json`), or the user picks one, keep it; replacing it is the user's call. Same goals as Stripe, in sandbox mode:
+- **Paddle** (`PADDLE_API_KEY`, `pdl_sdbx_apikey_…` works on `sandbox-api.paddle.com`): products and prices through the API; Paddle.js overlay checkout with the user id in `customData`; a notification destination at `<live url>/api/paddle/webhook` for `transaction.completed`, `subscription.updated`, `subscription.canceled`, verified with the `Paddle-Signature` header; the customer portal link for managing.
+- **Polar** (`POLAR_ACCESS_TOKEN`, sandbox at `sandbox-api.polar.sh`): products, a checkout session with the user id in `external_customer_id` or metadata, a webhook endpoint for `order.paid` and `subscription.revoked` (or `subscription.canceled`) verified with Standard Webhooks, and the customer portal.
+- **Lemon Squeezy** (`LEMONSQUEEZY_API_KEY`): published products and variants, checkout with `checkout_data.custom.user_id`, a webhook verified with `X-Signature`. Lemon Squeezy takes no new sign-ups and shuts down on March 31, 2027, so Liftoff adds a task to plan the move; don't start a new app on it.
+
+`liftoff verify --only pay-products,pay-webhook` checks Paddle, Polar and Lemon Squeezy the same way it checks Stripe, and for Paddle and Polar `pay-e2e` is proven from a completed sandbox purchase and a cancelled subscription in the last 30 days.
+
 ## iOS / Android (RevenueCat)
 1. Expo/React Native: `react-native-purchases` (+ `react-native-purchases-ui` for a ready paywall). Flutter: `purchases_flutter`. Native: the RevenueCat SPM / Gradle package.
 2. Configure at app start with the public SDK key per platform; call `logIn(userId)` after auth.
@@ -34,4 +42,7 @@ From reading the app, propose the paid tier (name it "<App> Pro"), what it unloc
 - `liftoff step payments done --provider stripe` / `liftoff step paywall done --provider revenuecat`
 - Tick: `pay-sdk`, `pay-webhook`, `pay-entitlement`, `pay-portal`, `pay-restore` (mobile), `pay-products` (once products exist).
 - Task (blocks release): "Switch payments to live keys" unless the user already went live. `/liftoff:go-live` does that switch.
-- If `liftoff init` found Lemon Squeezy or Paddle (`payments:` in `liftoff status --json`), keep it: they are merchants of record that handle sales tax, and replacing them is the user's call.
+- Record the provider you used: `liftoff step payments done --provider paddle` (or polar, lemonsqueezy). Verify picks the checks for that provider from it.
+
+## A service Liftoff doesn't list
+If the user added the provider themselves (Liftoff Cloud: `customServices` in `liftoff_plan`), keep the goals above and get the how from its docs: read them with `liftoff_docs` (start at the link the user gave; `/llms.txt` or an OpenAPI file are quicker when they exist), call its API with `liftoff_call`, and have the app read the key from the env var named `keyName`. Use its test or sandbox mode. `liftoff verify` can't check it: tick the items you tested yourself (they show as reported), and record the service's name as the provider.

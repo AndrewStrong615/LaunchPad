@@ -9,23 +9,23 @@ import {
 import { STEPS, accountsForStep, checklistFor } from '../../lib/catalog.mjs';
 import { nextAction } from '../../lib/advice.mjs';
 import { renderScaffold, SCAFFOLDS } from '../../lib/scaffold.mjs';
-import { applyVerify, purchaseProvenByStripe, runVerify, VERIFIABLE } from '../../lib/verify.mjs';
+import { applyVerify, canProve, runVerify } from '../../lib/verify.mjs';
 import { collectPulse, recordPulse } from '../../lib/pulse.mjs';
 import { walk } from '../../lib/scan.mjs';
-import { ACCOUNT_HOSTS, listUserAccounts, sandboxEnvPlan, stripeConnected, userEnv } from './accounts.mjs';
+import { ACCOUNT_HOSTS, accountModes, customNames, listUserAccounts, sandboxEnvPlan, stripeConnected, userEnv, usesFor } from './accounts.mjs';
+import { SCHEMES, callCustom, customEnv, listCustomServices, readDocs } from './custom.mjs';
 import { githubToken } from './importer.mjs';
 import { ROOT, SKILLS } from './agent.mjs';
 import { HttpError } from './http.mjs';
 
-// Items the server can prove; they're ticked only by verify or the pre-scan.
-const PROVABLE = new Set([...VERIFIABLE, 'sec-keys']);
-
-// The purchase flow test is proven from Stripe's records for web apps that pay
-// through Stripe. Apps that sell through the stores (or Paddle, Lemon Squeezy)
-// can't be checked that way yet, so Claude still records their test run.
-function isProvable(state, item, stripe) {
-  if (item === 'pay-e2e') return purchaseProvenByStripe(state, { stripeConnected: stripe });
-  return PROVABLE.has(item);
+// Items the server can prove are ticked only by verify or the pre-scan. Which
+// ones it can prove depends on the services the app uses (canProve): an item
+// for a service Liftoff has no check for, like the user's own, is ticked by
+// Pilot once tested and shows as reported. The purchase flow test is proven
+// from Stripe's, Paddle's or Polar's records for web apps that sell through them.
+export function isProvable(ctx, uid, state, item) {
+  if (item === 'sec-keys') return true;
+  return canProve(state, item, { uses: usesFor(ctx.store, uid, state), stripeConnected: stripeConnected(ctx.store, uid) });
 }
 
 const POSTHOG_HOSTS = ACCOUNT_HOSTS.posthog;
@@ -108,8 +108,8 @@ export function setLiveUrl(state, url) {
 const clip = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
 // The plan Claude works from: liftoff_plan's answer.
-export function planFor(state, accounts, envPlan) {
-  const summary = summarize(state, { accounts });
+export function planFor(state, accounts, envPlan, custom = accounts.filter((a) => a.custom)) {
+  const summary = summarize(state, { accounts, custom });
   const byId = new Map(accounts.map((a) => [a.id, a]));
   return {
     app: { name: state.name, framework: state.framework, platforms: state.platforms, auth: state.auth || null, payments: state.payments || [], packageManager: state.packageManager || null, apps: state.apps || [] },
@@ -125,7 +125,7 @@ export function planFor(state, accounts, envPlan) {
         provider: s.provider || undefined,
         note: s.note || undefined,
         waitsOn: s.waitingOn.length ? s.waitingOn : undefined,
-        accounts: accountsForStep(def, state.platforms).map((id) => ({ id, connected: !!byId.get(id)?.connected })),
+        accounts: accountsForStep(def, state.platforms, summary.uses).map((id) => ({ id, ...(byId.get(id)?.custom ? { name: byId.get(id).name, own: true } : {}), connected: !!byId.get(id)?.connected, mode: byId.get(id)?.mode || undefined })),
         does: def.does,
       };
     }),
@@ -134,15 +134,28 @@ export function planFor(state, accounts, envPlan) {
     settings: state.config || {},
     preScan: (state.lastScan?.findings || []).filter((f) => !f.ok).map((f) => ({ id: f.id, detail: f.detail })),
     keys: { inSandbox: envPlan.vaulted.map((v) => v.name), plain: Object.keys(envPlan.plain), signingForCI: envPlan.signing },
+    // What the app uses per category (stripe, paddle, or one of the user's own services).
+    uses: summary.uses,
+    // Services the user added themselves: use them with liftoff_docs and liftoff_call.
+    customServices: custom.map((c) => ({
+      id: c.id,
+      name: c.name,
+      for: c.category,
+      docs: c.docs,
+      apiHosts: c.hosts,
+      keyName: c.keyName,
+      keySentAs: SCHEMES[c.auth.scheme] + (c.auth.header ? ` (${c.auth.header})` : c.auth.param ? ` (${c.auth.param})` : ''),
+      keyCheck: c.check ? `${c.check.ok === true ? 'works' : c.check.ok === false ? 'rejected' : 'not checked'}: ${c.check.detail}` : 'not checked',
+    })),
     deploys: state.deploys,
     nextAction: nextAction({ ...summary, pulse: state.pulse?.latest || null }),
   };
 }
 
-function checklistView(state, hasStripe) {
+function checklistView(ctx, uid, state) {
   return checklistFor(state.platforms).map((c) => {
     const cur = state.checklist[c.id] || {};
-    return { id: c.id, category: c.category, title: c.title, done: !!cur.done, by: cur.by || undefined, verify: cur.verify ? `${cur.verify.ok === true ? 'pass' : cur.verify.ok === false ? 'FAIL' : 'not checked'}: ${cur.verify.detail}` : undefined, provable: isProvable(state, c.id, hasStripe) || undefined };
+    return { id: c.id, category: c.category, title: c.title, done: !!cur.done, by: cur.by || undefined, verify: cur.verify ? `${cur.verify.ok === true ? 'pass' : cur.verify.ok === false ? 'FAIL' : 'not checked'}: ${cur.verify.detail}` : undefined, provable: isProvable(ctx, uid, state, c.id) || undefined };
   });
 }
 
@@ -158,6 +171,9 @@ export async function verifyApp(ctx, uid, slug, only = null, extra = {}) {
     only,
     fetch: ctx.safeFetch,
     repo: snap.config?.['github.repo'] || null,
+    uses: usesFor(ctx.store, uid, snap),
+    names: customNames(ctx.store, uid),
+    modes: accountModes(ctx.store, uid),
   });
   const state = ctx.store.updateApp(uid, slug, (s) => applyVerify(s, results));
   return { state, results };
@@ -178,6 +194,14 @@ const HANDLERS = {
   liftoff_plan(ctx, run) {
     const state = ctx.store.loadApp(run.uid, run.slug);
     return planFor(state, listUserAccounts(ctx.store, run.uid), sandboxEnvPlan(ctx.store, run.uid));
+  },
+
+  liftoff_docs(ctx, run, input) {
+    return readDocs(ctx, run.uid, { service: str(input.service, 80), url: str(input.url, 1000) || undefined });
+  },
+
+  liftoff_call(ctx, run, input) {
+    return callCustom(ctx, run.uid, { service: str(input.service, 80), method: str(input.method, 10), url: str(input.url, 2000), headers: input.headers, body: typeof input.body === 'string' ? input.body : input.body ?? undefined });
   },
 
   liftoff_skill(ctx, run, input) {
@@ -221,14 +245,16 @@ const HANDLERS = {
   },
 
   liftoff_checklist(ctx, run) {
-    return checklistView(ctx.store.loadApp(run.uid, run.slug), stripeConnected(ctx.store, run.uid));
+    return checklistView(ctx, run.uid, ctx.store.loadApp(run.uid, run.slug));
   },
 
   liftoff_check(ctx, run, input) {
     const item = str(input.item, 60);
     const done = input.done !== false;
-    if (done && isProvable(ctx.store.loadApp(run.uid, run.slug), item, stripeConnected(ctx.store, run.uid))) {
-      if (item === 'pay-e2e') throw new Error('"pay-e2e" is proven from Stripe\'s records, not ticked by hand. Once the test ids are in the app and a preview that uses Stripe test keys is deployed (preview.url), call liftoff_prove_purchase: Liftoff runs the purchase in a real browser and checks Stripe. If the test already ran in CI, liftoff_verify (only: ["pay-e2e"]) looks in Stripe test mode for that paid Checkout and its cancellation.');
+    const state = ctx.store.loadApp(run.uid, run.slug);
+    if (done && isProvable(ctx, run.uid, state, item)) {
+      if (item === 'pay-e2e' && (usesFor(ctx.store, run.uid, state).payments || 'stripe') === 'stripe') throw new Error('"pay-e2e" is proven from Stripe\'s records, not ticked by hand. Once the test ids are in the app and a preview that uses Stripe test keys is deployed (preview.url), call liftoff_prove_purchase: Liftoff runs the purchase in a real browser and checks Stripe. If the test already ran in CI, liftoff_verify (only: ["pay-e2e"]) looks in Stripe test mode for that paid Checkout and its cancellation.');
+      if (item === 'pay-e2e') throw new Error('"pay-e2e" is proven from the payment provider\'s sandbox records, not ticked by hand. Run the purchase test (a sandbox checkout, then a cancellation) on the preview, then call liftoff_verify with only: ["pay-e2e"].');
       throw new Error(`"${item}" is checked against the real service. Prove it with liftoff_verify (only: ["${item}"]) instead.`);
     }
     let out;
@@ -314,10 +340,17 @@ const HANDLERS = {
 };
 
 // Tools that wait on the user before they run (see runs.mjs).
+// Each returns what to ask the user, or null when this call needs no yes.
 export const NEEDS_APPROVAL = {
   github_set_secret(ctx, run, input) {
     const state = ctx.store.loadApp(run.uid, run.slug);
     return `Copy your ${str(input.from, 80)} into the GitHub Actions secret ${str(input.name, 100)} on ${state.source?.fullName || 'the repo'}`;
+  },
+  // Deleting something in one of the user's own services waits for their yes.
+  liftoff_call(ctx, run, input) {
+    if (str(input.method, 10).toUpperCase() !== 'DELETE') return null;
+    const svc = listCustomServices(ctx.store, run.uid).find((c) => c.id === str(input.service, 80) || c.name.toLowerCase() === str(input.service, 80).toLowerCase());
+    return `Send DELETE ${str(input.url, 300)} with your ${svc?.name || str(input.service, 80)} key`;
   },
 };
 
@@ -327,7 +360,8 @@ HANDLERS.github_set_secret = async (ctx, run, input) => {
   const name = str(input.name, 100);
   if (!/^[A-Z_][A-Z0-9_]*$/.test(name) || name.startsWith('GITHUB_')) throw new Error('Secret names are upper-case letters, digits and underscores, and cannot start with GITHUB_.');
   const from = str(input.from, 100);
-  const value = userEnv(ctx.store, run.uid)[from];
+  // A built-in account's key, or the key of one of the user's own services.
+  const value = userEnv(ctx.store, run.uid)[from] || customEnv(ctx.store, run.uid)[from];
   if (!value) throw new Error(`${from} is not connected. Add a task asking the user to connect it.`);
   const token = githubToken(ctx.store, run.uid);
   if (!token) throw new Error('No GitHub sign-in for this user.');
@@ -353,6 +387,8 @@ export function describeTool(name, input = {}) {
   const i = input || {};
   switch (name) {
     case 'liftoff_plan': return 'Read the launch plan';
+    case 'liftoff_docs': return `Read ${i.service}’s docs${i.url ? `: ${clip(String(i.url), 200)}` : ''}`;
+    case 'liftoff_call': return `Called ${i.service}: ${String(i.method || 'GET').toUpperCase()} ${clip(String(i.url || ''), 200)}`;
     case 'liftoff_skill': return `Read the ${i.name} skill`;
     case 'liftoff_template': return `Got the ${i.kind} template`;
     case 'liftoff_step': return `${i.step} → ${i.status}${i.note ? `: ${i.note}` : ''}`;
