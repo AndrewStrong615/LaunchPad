@@ -15,7 +15,8 @@ import { connectUserAccount, disconnectUserAccount, listUserAccounts } from './a
 import { githubToken, importFromGitHub, importFromZip, rescan } from './importer.mjs';
 import { pulseApp, validateSetting, verifyApp } from './tools.mjs';
 import { LIVE, publicRun } from './runs.mjs';
-import { MODELS } from './agent.mjs';
+import { MODELS, STRONGEST_TIER, TIERS, modelFor, tierOf } from './agent.mjs';
+import { toTokens } from './brand.mjs';
 import { isRunId, isSlug } from './store.mjs';
 import { badgeSvg, countClick, createReport, deleteReport, latestReport, loadReport, renderMissing, renderReport, reportShot, reportView } from './report.mjs';
 
@@ -36,7 +37,8 @@ const STATE_COOKIE = 'lc_oauth';
 const THEMES = ['system', 'light', 'dark'];
 
 // Account settings kept on the user: how the app looks and the model runs
-// default to. Anything unknown reads as "not set".
+// default to (saved as the model id, shown as its mode: publicPrefs).
+// Anything unknown reads as "not set".
 function prefsOf(user) {
   const p = user.prefs || {};
   return {
@@ -44,6 +46,7 @@ function prefsOf(user) {
     model: MODELS.some((m) => m.id === p.model) ? p.model : null,
   };
 }
+const publicPrefs = (prefs) => ({ theme: prefs.theme, tier: tierOf(prefs.model) });
 
 // A small fixed-window limiter, per process.
 function limiter() {
@@ -67,6 +70,9 @@ export function createApp(ctx) {
   const secure = config.secureCookies;
 
   const accountsOf = (uid) => listUserAccounts(store, uid);
+  // Runs as the web app sees them: tokens, not dollars (lib/brand.mjs).
+  const tokens = (usd) => toTokens(usd, config.tokensPerUsd);
+  const pub = (run, after = 0) => publicRun(run, after, config.tokensPerUsd);
 
   // Everything the Flight Board shows for one app, plus what the cloud adds.
   function view(uid, state, accounts = accountsOf(uid)) {
@@ -82,7 +88,7 @@ export function createApp(ctx) {
       cloud: {
         source: { type: src.type, fullName: src.fullName, url: src.url, ref: src.ref, private: src.private, filename: src.filename, importedAt: src.importedAt, commit: src.commit },
         scan: state.lastScan ? { at: state.lastScan.at, failing: state.lastScan.findings.filter((f) => !f.ok && s.checklist.some((c) => c.id === f.id)) } : null,
-        run: latest ? { id: latest.id, status: latest.status, pending: latest.pending.length, cost: latest.cost, pr: latest.pr || null, createdAt: latest.createdAt } : null,
+        run: latest ? { id: latest.id, status: latest.status, pending: latest.pending.length, tokens: tokens(latest.cost), pr: latest.pr || null, createdAt: latest.createdAt } : null,
         runs: all.length,
         proof: ctx.proof.view(uid, state),
         report: reportView(ctx, uid, state),
@@ -172,7 +178,7 @@ export function createApp(ctx) {
 
   // ---------- deleting an account ----------
 
-  // Keys mirrored into Claude's vault go first: if that fails nothing is
+  // Keys mirrored into the Anthropic vault runs use go first: if that fails nothing is
   // deleted, so no key is left behind without a record of it. Taking back the
   // GitHub grant is best effort (the person can also do it on GitHub).
   async function deleteAccount(uid) {
@@ -184,7 +190,7 @@ export function createApp(ctx) {
         } catch (err) {
           if (err?.status !== 404) {
             console.error(`[liftoff-cloud] deleting vault ${secrets.vault.id} for ${uid}:`, err?.message || err);
-            throw new HttpError(502, "Couldn't remove your keys from Claude's vault just now, so nothing was deleted. Try again in a minute.");
+            throw new HttpError(502, "Couldn't remove your keys from the vault cloud runs use just now, so nothing was deleted. Try again in a minute.");
           }
         }
       } else console.warn(`[liftoff-cloud] ${uid} deleted their account; vault ${secrets.vault.id} is still in the Anthropic account (no API key on this server to delete it).`);
@@ -198,8 +204,9 @@ export function createApp(ctx) {
     return { githubRevoked };
   }
 
-  function meModels(uid) {
-    return { choices: MODELS, default: runs.defaultModel(uid), server: runs.defaultModel() };
+  // The modes a run can use (lib/agent.mjs), without the models behind them.
+  function meTiers(uid) {
+    return { choices: TIERS, default: tierOf(runs.defaultModel(uid)), server: tierOf(runs.defaultModel()), strongest: STRONGEST_TIER };
   }
 
   // ---------- API ----------
@@ -215,11 +222,12 @@ export function createApp(ctx) {
       const secrets = store.getSecrets(uid);
       return ok({
         user: { login: user.login, name: user.name, avatar: user.avatar, createdAt: user.createdAt || null, via: user.githubId ? 'github' : 'local' },
-        prefs: prefsOf(user),
+        prefs: publicPrefs(prefsOf(user)),
+        assistant: { name: config.assistant },
         github: { signedIn: !!secrets.github, token: !!githubToken(store, uid), oauth: github.oauthEnabled, scope: secrets.github ? secrets.githubScope || '' : null },
         claude: ready,
-        models: meModels(uid),
-        limits: { uploadMb: Math.round(config.maxUploadBytes / 1048576), runBudgetUsd: config.runBudgetUsd, maxRuns: config.maxRunsPerUser },
+        tiers: meTiers(uid),
+        limits: { uploadMb: Math.round(config.maxUploadBytes / 1048576), runBudgetTokens: tokens(config.runBudgetUsd), topUpTokens: tokens(10), maxRuns: config.maxRunsPerUser },
         settings: CONFIG_KEYS,
         admin: ctx.records.isAdmin(user),
       });
@@ -234,12 +242,13 @@ export function createApp(ctx) {
         if (!THEMES.includes(body.theme)) throw new HttpError(400, 'Theme is one of: system, light, dark.');
         prefs.theme = body.theme;
       }
-      if ('model' in body) {
-        if (body.model !== null && !MODELS.some((m) => m.id === body.model)) throw new HttpError(400, `Pick one of these models: ${MODELS.map((m) => m.label).join(', ')}.`);
-        prefs.model = body.model;
+      if ('tier' in body) {
+        const model = body.tier === null ? null : modelFor(String(body.tier));
+        if (body.tier !== null && !model) throw new HttpError(400, `Pick one of these modes: ${TIERS.map((t) => t.label).join(', ')}.`);
+        prefs.model = model;
       }
       const saved = store.saveUser({ ...store.getUser(uid), prefs });
-      return ok({ prefs: prefsOf(saved), models: meModels(uid) });
+      return ok({ prefs: publicPrefs(prefsOf(saved)), tiers: meTiers(uid) });
     }
     if (parts[0] === 'me' && parts[1] === 'sign-out-others' && parts.length === 2 && M === 'POST') {
       limit(`sessions:${uid}`, 10, 60000);
@@ -249,7 +258,7 @@ export function createApp(ctx) {
       limit(`delete:${uid}`, 5, 60000);
       const body = await readJson(req);
       if (String(body.confirm || '').trim().toLowerCase() !== String(user.login).toLowerCase()) throw new HttpError(400, `Type ${user.login} to confirm.`);
-      if (runs.hasOpenRuns(uid)) throw new HttpError(409, 'Stop your Claude runs first, then delete your account.');
+      if (runs.hasOpenRuns(uid)) throw new HttpError(409, 'Stop your runs first, then delete your account.');
       const done = await deleteAccount(uid);
       return send(res, 200, { deleted: true, ...done }, 'application/json; charset=utf-8', { 'set-cookie': cookie(SID_COOKIE, '', { maxAge: 0, secure }) });
     }
@@ -394,29 +403,29 @@ export function createApp(ctx) {
       }
 
       if (rest[0] === 'runs') {
-        if (rest.length === 1 && M === 'GET') return ok(runs.list(uid, slug).map((r) => ({ ...publicRun(r), events: undefined })));
+        if (rest.length === 1 && M === 'GET') return ok(runs.list(uid, slug).map((r) => ({ ...pub(r), events: undefined })));
         if (rest.length === 1 && M === 'POST') {
           limit(`run:${uid}`, 10, 3600000);
           const budgetUsd = ctx.billing.runBudget(uid, slug);
           const body = await readJson(req);
-          const run = await runs.start(uid, slug, { steps: body.steps || [], note: body.note || '', model: body.model ? String(body.model) : null, budgetUsd });
-          return ok(publicRun(run));
+          const run = await runs.start(uid, slug, { steps: body.steps || [], note: body.note || '', tier: body.tier ? String(body.tier) : null, budgetUsd });
+          return ok(pub(run));
         }
         const id = rest[1];
         if (!isRunId(id)) throw new HttpError(404, 'No such run');
         const run = runs.must(uid, slug, id);
         if (rest.length === 2 && M === 'GET') {
           runs.ensureFollowing(run);
-          return ok(publicRun(run, Number(url.searchParams.get('after') || 0)));
+          return ok(pub(run, Number(url.searchParams.get('after') || 0)));
         }
         if (M === 'POST' && rest.length === 3) {
           limit(`act:${uid}`, 60, 60000);
           const body = await readJson(req);
-          if (rest[2] === 'message') return ok(publicRun(await runs.message(uid, slug, id, body.text)));
-          if (rest[2] === 'answer') return ok(publicRun(await runs.answer(uid, slug, id, { eventId: body.eventId, text: body.text })));
-          if (rest[2] === 'approve') return ok(publicRun(await runs.approve(uid, slug, id, { eventId: body.eventId, allow: body.allow === true, reason: body.reason })));
-          if (rest[2] === 'stop') return ok(publicRun(await runs.stop(uid, slug, id)));
-          if (rest[2] === 'budget') return ok(publicRun(await runs.raiseBudget(uid, slug, id, body.addUsd, (n) => ctx.billing.raiseLimit(uid, slug, n))));
+          if (rest[2] === 'message') return ok(pub(await runs.message(uid, slug, id, body.text)));
+          if (rest[2] === 'answer') return ok(pub(await runs.answer(uid, slug, id, { eventId: body.eventId, text: body.text })));
+          if (rest[2] === 'approve') return ok(pub(await runs.approve(uid, slug, id, { eventId: body.eventId, allow: body.allow === true, reason: body.reason })));
+          if (rest[2] === 'stop') return ok(pub(await runs.stop(uid, slug, id)));
+          if (rest[2] === 'budget') return ok(pub(await runs.raiseBudget(uid, slug, id, body.addTokens, (n) => ctx.billing.raiseLimit(uid, slug, n))));
         }
         if (M === 'GET' && rest[2] === 'outputs' && rest[3]) {
           const { file, body } = await runs.download(uid, slug, id, rest[3]);
@@ -451,7 +460,7 @@ export function createApp(ctx) {
       }
       const report = loadReport(ctx, ref.uid, ref.slug, m[1]);
       if (!report) return gone();
-      return send(res, 200, renderReport(report), 'text/html; charset=utf-8', PUBLIC_CACHE);
+      return send(res, 200, renderReport(report, { assistant: config.assistant }), 'text/html; charset=utf-8', PUBLIC_CACHE);
     }
     if ((m = BADGE_PATH.exec(url.pathname))) {
       const ref = store.published(m[1]);
@@ -503,7 +512,7 @@ export function createApp(ctx) {
           if (signedIn(req)) return redirect(res, '/');
           return page(res, 'login.html');
         }
-        if (url.pathname === '/login/options') return send(res, 200, { github: github.oauthEnabled, dev: config.devLogin });
+        if (url.pathname === '/login/options') return send(res, 200, { github: github.oauthEnabled, dev: config.devLogin, assistant: config.assistant });
         if (url.pathname === '/billing/done') {
           // Back from Stripe Checkout: the pass is granted from Stripe's own record of it.
           const me = signedIn(req);
@@ -542,7 +551,7 @@ export function createApp(ctx) {
       if (err instanceof HttpError) [status, message] = [err.status, err.message];
       else if (typeof err?.status === 'number' && err.headers !== undefined) {
         // An Anthropic API error: never pass its status through (a 401 would sign the user out).
-        [status, message] = [502, `Claude's service answered ${err.status}: ${String(err.error?.error?.message || err.message).slice(0, 300)}`];
+        [status, message] = [502, `The AI service behind runs answered ${err.status}: ${String(err.error?.error?.message || err.message).slice(0, 300)}`];
       } else if (typeof err?.status === 'number' && err.status >= 400 && err.status < 500) [status, message] = [err.status, err.message];
       else if (err?.constructor === Error && url.pathname.startsWith('/api/apps/')) [status, message] = [400, err.message]; // a rule in lib/state.mjs (unknown step, task…)
       if (status >= 500) console.error(`[liftoff-cloud] ${req.method} ${url.pathname}:`, err?.stack || err);

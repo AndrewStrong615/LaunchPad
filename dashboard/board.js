@@ -511,7 +511,7 @@ function renderApp(app) {
               h('div', { class: 'items' }, items.map((c) => h('label', { class: 'check' },
                 h('input', { type: 'checkbox', checked: c.done, onchange: (e) => mutate(`/api/apps/${app.slug}/checklist/${c.id}`, 'POST', { done: e.target.checked }) }),
                 h('span', { class: 'tx' }, c.title, c.verify?.ok === false ? h('span', { class: 'why' }, c.verify.detail) : null),
-                c.done && c.by ? h('span', { class: 'by' }, c.by === 'verified' ? 'verified' : `by ${c.by}`) : null))));
+                c.done && c.by ? h('span', { class: 'by' }, c.by === 'verified' ? 'verified' : `by ${hook('whoTicked', c.by) || c.by}`) : null))));
           })),
         hook('mainBottom', app)),
 

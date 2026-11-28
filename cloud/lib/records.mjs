@@ -280,7 +280,8 @@ function groupBy(rs, keyOf) {
 
 const stepLabel = (id) => STEPS.find((s) => s.id === id)?.label || id;
 const checkTitle = (id) => CHECKLIST.find((c) => c.id === id)?.title || id;
-const modelLabel = (id) => MODELS.find((m) => m.id === id)?.label || id || 'Unknown model';
+// Admins see the mode and the real model behind it, e.g. "Cruise · Claude Sonnet 5.5".
+const modelLabel = (id) => { const m = MODELS.find((x) => x.id === id); return m ? `${m.label} · ${m.name}` : id || 'Unknown model'; };
 
 // What the admin page shows: totals, then by stack, step and model, then
 // the checks and errors that come up most.

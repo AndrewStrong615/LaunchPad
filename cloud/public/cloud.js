@@ -1,8 +1,14 @@
 // Liftoff Cloud screens on top of the shared Flight Board front end
 // (board.js): adding apps, connecting accounts, account settings, and runs
-// where Claude does the launch steps in the cloud. A run reads like a messages thread: Claude's
-// bubbles on the left, yours on the right, tool work folded into one line, and
-// Claude's questions and approvals as cards right where it asked.
+// where the assistant does the launch steps in the cloud. A run reads like a
+// messages thread: the assistant's bubbles on the left, yours on the right,
+// tool work folded into one line, and its questions and approvals as cards
+// right where it asked.
+//
+// The assistant goes by its Liftoff name (Pilot unless the server sets
+// another), runs come in modes (Cruise, Boost) rather than models, and what
+// runs use is shown in tokens. The server sends all three (lib/brand.mjs);
+// only the admin run records page shows dollars.
 //
 // Board patches the page in place on every refresh, so handlers read values
 // from the event (e.currentTarget, form elements) or from C, never from an
@@ -41,10 +47,11 @@
   const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // Cloud-only state.
-  const C = { me: null, slug: null, run: null, runs: null, pick: {}, stick: true, busy: false, repos: null, note: '', draft: '', loading: false, model: null, open: {}, sent: null, zipName: '', autoScroll: 0 };
-  const models = () => C.me?.models?.choices || [];
-  const modelLabel = (id) => models().find((m) => m.id === id)?.label || id;
-  const STRONGEST = 'claude-opus-5-5';
+  const C = { me: null, slug: null, run: null, runs: null, pick: {}, stick: true, busy: false, repos: null, note: '', draft: '', loading: false, tier: null, open: {}, sent: null, zipName: '', autoScroll: 0 };
+  const ai = () => C.me?.assistant?.name || 'Pilot';
+  const tiers = () => C.me?.tiers?.choices || [];
+  const tierLabel = (id) => tiers().find((t) => t.id === id)?.label || id;
+  const strongest = () => C.me?.tiers?.strongest || null;
   try {
     const saved = JSON.parse(sessionStorage.getItem('lc-run') || 'null');
     if (saved) Object.assign(C, { slug: saved.slug, runId: saved.runId });
@@ -56,7 +63,12 @@
   const appOf = (slug) => state.apps.find((a) => a.slug === slug);
   const stepLabel = (app, id) => app?.steps.find((s) => s.id === id)?.label || id;
   const runPill = (status, sm) => h('span', { class: `pill ${RUN_TONE[status] || ''}${sm ? ' sm' : ''}` }, status === 'running' || status === 'starting' ? h('span', { class: 'd' }) : null, RUN_WORD[status] || status);
+  // Dollars only on the admin run records page; everyone else sees tokens.
   const usd = (n) => (n === null || n === undefined ? '–' : `$${Number(n).toFixed(2)}`);
+  const num = (n) => Number(n || 0).toLocaleString('en-US');
+  const tok = (n) => (n === null || n === undefined ? '–' : `${num(n)} ${Number(n) === 1 ? 'token' : 'tokens'}`);
+  // What "Add … and continue" adds to a run paused at its budget.
+  const topUp = () => C.me?.limits?.topUpTokens || 1000;
   const clock = (iso) => {
     const d = new Date(iso);
     const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -81,13 +93,13 @@
     }
   }
 
-  // Claude's avatar: a plain disc with its initial, ringed while it works.
+  // The assistant's avatar: a plain disc with its initial, ringed while it works.
   const orb = (status, lg) => h('span', {
     class: 'orb' + (lg ? ' lg' : '') + (status === 'running' || status === 'starting' ? ' thinking' : status === 'needs-you' ? ' waiting' : ''),
     'aria-hidden': 'true',
-  }, 'C');
+  }, ai().charAt(0).toUpperCase());
 
-  // Claude writes light Markdown: paragraphs, lists, `code`, **bold** and links.
+  // The assistant writes light Markdown: paragraphs, lists, `code`, **bold** and links.
   // Built as DOM nodes, never as HTML.
   function inline(text) {
     const out = [];
@@ -207,7 +219,7 @@
       h('section', { class: 'card spot' },
         h('div', { class: 'card-head' }, h('span', { class: 'head-tile' }, icon('upload')), h('h2', {}, 'Upload a zip')),
         h('div', { class: 'card-pad' }, drop,
-          h('p', { class: 'small' }, 'Claude hands back your changes as a patch and an updated zip.'))));
+          h('p', { class: 'small' }, `${ai()} hands back your changes as a patch and an updated zip.`))));
   }
 
   function addView() {
@@ -235,7 +247,7 @@
       });
     } },
     h('div', { class: 'modal-head' }, h('span', { class: 'head-tile' }, icon('key')), h('div', {}, h('h2', {}, `Connect ${a.label}`),
-      h('p', { class: 'small' }, 'Stored encrypted on the server. Claude never sees the real value: its sandbox gets a placeholder that becomes the key only on the way to ', a.label, '.'))),
+      h('p', { class: 'small' }, `Stored encrypted on the server. ${ai()} never sees the real value: its sandbox gets a placeholder that becomes the key only on the way to `, a.label, '.'))),
     a.fields.map((f) => h('label', { class: 'field' }, h('span', {}, f),
       big(f) ? h('textarea', { name: f, class: 'in', required: true, spellcheck: 'false' })
         : h('input', { name: f, type: /ACCOUNT_ID|KEY_ID|ISSUER_ID/.test(f) ? 'text' : 'password', autocomplete: 'off', spellcheck: 'false', required: true }))),
@@ -274,7 +286,7 @@
   async function savePrefs(change, done) {
     try {
       const r = await post('/api/me/prefs', change);
-      if (C.me) Object.assign(C.me, { prefs: r.prefs, models: r.models });
+      if (C.me) Object.assign(C.me, { prefs: r.prefs, tiers: r.tiers });
       if (done) toast(done);
     } catch (e) {
       toast(e.message);
@@ -321,21 +333,22 @@
   }
 
   function runsCard(me) {
-    const choice = me.models.default;
+    const choice = me.tiers.default;
     return h('section', { class: 'card narrow' },
-      h('div', { class: 'card-head' }, h('h2', {}, 'Claude runs')),
+      h('div', { class: 'card-head' }, h('h2', {}, `Runs with ${ai()}`)),
       h('div', { class: 'card-body' },
-        models().length ? [
-          h('div', { class: 'sec-head' }, h('span', { class: 'sec-title' }, 'Default model')),
-          h('div', { class: 'picker models', role: 'radiogroup', 'aria-label': 'Default model' }, models().map((m) => h('label', { class: 'pick spot' + (m.id === choice ? ' on' : ''), key: m.id },
-            h('input', { type: 'radio', name: 'default-model', value: m.id, checked: m.id === choice, onchange: () => { C.model = null; savePrefs({ model: m.id }, `New runs start on ${m.label}`); } }),
-            h('span', { class: 't' }, h('b', {}, m.label), h('span', { class: 'small' }, m.hint))))),
-          h('p', { class: 'small' }, 'New runs start on this model. You can still pick the other one when you start a run.'),
+        tiers().length ? [
+          h('div', { class: 'sec-head' }, h('span', { class: 'sec-title' }, 'Default mode')),
+          h('div', { class: 'picker models', role: 'radiogroup', 'aria-label': 'Default mode' }, tiers().map((t) => h('label', { class: 'pick spot' + (t.id === choice ? ' on' : ''), key: t.id },
+            h('input', { type: 'radio', name: 'default-tier', value: t.id, checked: t.id === choice, onchange: () => { C.tier = null; savePrefs({ tier: t.id }, `New runs start in ${t.label}`); } }),
+            h('span', { class: 't' }, h('b', {}, t.label), h('span', { class: 'small' }, t.hint))))),
+          h('p', { class: 'small' }, 'New runs start in this mode. You can still pick the other one when you start a run.'),
         ] : null,
         h('dl', { class: 'kv' },
-          h('div', {}, h('dt', {}, 'Budget per run'), h('dd', {}, usd(me.limits.runBudgetUsd))),
+          h('div', {}, h('dt', {}, 'Budget per run'), h('dd', {}, tok(me.limits.runBudgetTokens))),
           h('div', {}, h('dt', {}, 'Runs at once'), h('dd', {}, `Up to ${me.limits.maxRuns}`)),
-          h('div', {}, h('dt', {}, 'Cloud runs on this server'), h('dd', {}, me.claude.ok ? h('span', { class: 'pill good sm' }, 'Ready') : h('span', { class: 'small', title: me.claude.why }, 'Not set up yet'))))));
+          h('div', {}, h('dt', {}, 'Cloud runs on this server'), h('dd', {}, me.claude.ok ? h('span', { class: 'pill good sm' }, 'Ready') : h('span', { class: 'small', title: me.claude.why }, 'Not set up yet')))),
+        h('p', { class: 'small powered' }, `${ai()} is Liftoff’s launch assistant. It runs on Claude, an AI model made by Anthropic.`)));
   }
 
   function connectionsCard(me) {
@@ -394,9 +407,9 @@
       h('p', { class: 'small' }, 'This can’t be undone. Liftoff Cloud deletes:'))),
     h('ul', { class: 'list-tight' },
       h('li', {}, n === 1 ? 'Your app, with its imported code and run history' : n ? `Your ${n} apps, with their imported code and run history` : 'Your apps, imported code and run history'),
-      h('li', {}, 'The keys you saved for Stripe, hosting and other services, here and in Claude’s vault'),
+      h('li', {}, 'The keys you saved for Stripe, hosting and other services, here and in the vault your runs use'),
       h('li', {}, C.me.github.signedIn ? 'Your GitHub sign-in, and the access you gave Liftoff Cloud' : 'Your settings and sign-ins')),
-    h('p', { class: 'small' }, 'Your repositories, pull requests and the services Claude set up stay as they are. So do the anonymous run records Liftoff learns from, which hold your app’s stack and how each step went, but no names, code or keys.'),
+    h('p', { class: 'small' }, `Your repositories, pull requests and the services ${ai()} set up stay as they are. So do the anonymous run records Liftoff learns from, which hold your app’s stack and how each step went, but no names, code or keys.`),
     h('label', { class: 'field' }, h('span', {}, 'Type ', h('b', { class: 'mono' }, login), ' to confirm'),
       h('input', { name: 'confirm', type: 'text', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off', 'aria-label': `Type ${login} to confirm`,
         oninput: (e) => { e.currentTarget.form.querySelector('.btn.danger-solid').disabled = e.currentTarget.value.trim().toLowerCase() !== login.toLowerCase(); } })),
@@ -415,7 +428,7 @@
       h('div', { class: 'card-body' },
         h('div', { class: 'line' },
           h('div', { class: 'grow' }, h('div', { class: 'small' }, open
-            ? 'A Claude run is still going. Stop it first, then you can delete your account.'
+            ? `A run with ${ai()} is still going. Stop it first, then you can delete your account.`
             : 'Removes your apps, run history, saved keys and GitHub access from Liftoff Cloud. Your code and services stay as they are.')),
           h('button', { class: 'btn danger', type: 'button', disabled: open, onclick: deleteDialog }, icon('trash'), 'Delete account…'))));
   }
@@ -423,7 +436,7 @@
   function settingsView() {
     const head = h('div', { class: 'page-head narrow' }, h('div', {},
       h('h1', {}, 'Account settings'),
-      h('p', {}, 'Your profile, how Liftoff Cloud looks, and what Claude runs start with.')));
+      h('p', {}, 'Your profile, how Liftoff Cloud looks, and how your runs start.')));
     if (!C.me) return [head, h('div', { class: 'card narrow empty' }, h('p', {}, 'Loading your settings…'))];
     return [head, profileCard(C.me), appearanceCard(), runsCard(C.me), C.me.admin ? recordsCard() : null, connectionsCard(C.me), sessionsCard(), dangerCard()];
   }
@@ -452,7 +465,7 @@
       h('div', { class: 'card-head' }, h('h2', {}, 'Run records'), h('span', { class: 'end pill sm' }, 'Admin')),
       h('div', { class: 'card-body' },
         h('div', { class: 'line' },
-          h('div', { class: 'grow' }, h('div', { class: 'small' }, 'How every Claude run on this server went: success rates by stack and step, and what a step really costs. No names, code or keys.')),
+          h('div', { class: 'grow' }, h('div', { class: 'small' }, 'How every run on this server went: success rates by stack and step, and what a step really costs in dollars. No names, code or keys.')),
           h('button', { class: 'btn', type: 'button', onclick: openRecords }, 'Open', icon('arrow')))));
   }
 
@@ -482,13 +495,13 @@
     const head = h('div', { class: 'page-head' },
       h('div', {},
         h('h1', {}, 'Run records'),
-        h('p', {}, 'Every Claude run on this server: the stack, how each step ended, the checklist before and after, and the cost. No names, code or keys are kept. Only admins see this page.')),
+        h('p', {}, 'Every run on this server: the stack, how each step ended, the checklist before and after, and the real cost in dollars (people see tokens). No names, code or keys are kept. Only admins see this page.')),
       r?.total ? h('div', { class: 'actions' }, h('a', { class: 'btn', href: '/api/records/export', download: '' }, icon('download'), 'Download all')) : null);
     if (!C.me) return [head, h('div', { class: 'card empty' }, h('p', {}, 'Loading…'))];
     if (!C.me.admin) return [head, h('div', { class: 'card empty' }, h('p', {}, 'Run records are only for the admins of this server.'))];
     if (C.recordsError && !r) return [head, h('div', { class: 'note-box bad' }, icon('x'), h('span', {}, C.recordsError))];
     if (!r) return [head, h('div', { class: 'card empty' }, h('p', {}, 'Loading the records…'))];
-    if (!r.total) return [head, h('div', { class: 'card empty' }, h('p', {}, 'No runs recorded yet. Each Claude run adds one when it starts, and fills it in when it stops.'))];
+    if (!r.total) return [head, h('div', { class: 'card empty' }, h('p', {}, 'No runs recorded yet. Each run adds one when it starts, and fills it in when it stops.'))];
 
     const stats = h('section', { class: 'stats', 'aria-label': 'Totals' },
       statTile('Runs', String(r.total), `${Board.plural(r.apps, 'app')} since ${new Date(r.since).toLocaleDateString([], { month: 'short', day: 'numeric' })}`),
@@ -517,8 +530,8 @@
       { label: 'Why it got stuck', cell: (x) => (x.why.length ? h('span', { class: 'small' }, x.why[0].text) : '–') },
     ], r.bySteps), 'A step is tried when a run works on it and it wasn’t done yet');
 
-    const byModel = recCard('By model', null, recTable('Runs by model', [
-      { label: 'Model', cell: (x) => h('b', {}, x.label) },
+    const byModel = recCard('By mode and model', null, recTable('Runs by mode and model', [
+      { label: 'Mode · model', cell: (x) => h('b', {}, x.label) },
       { label: 'Runs', num: true, cell: (x) => x.runs },
       { label: 'Finished', num: true, cell: (x) => rate(x.finished, x.ended) },
       { label: 'Per run', num: true, cell: (x) => usd(x.avgCost) },
@@ -561,9 +574,9 @@
     return h('section', { class: 'card next run-card' + (needs ? ' needs' : '') },
       orb(r.status, true),
       h('div', { class: 'grow' },
-        h('div', { class: 'small' }, 'Claude run'),
-        h('h2', {}, r.status === 'needs-you' ? `Claude needs you (${r.pending})` : r.status === 'budget' ? 'Paused at its budget' : 'Claude is working on this app'),
-        h('p', {}, `Started ${ago(r.createdAt)}${r.cost === null ? '' : ` · ${usd(r.cost)} so far`}`)),
+        h('div', { class: 'small' }, 'Launch run'),
+        h('h2', {}, r.status === 'needs-you' ? `${ai()} needs you (${r.pending})` : r.status === 'budget' ? 'Paused at its budget' : `${ai()} is working on this app`),
+        h('p', {}, `Started ${ago(r.createdAt)}${r.tokens === null ? '' : ` · ${tok(r.tokens)} so far`}`)),
       h('div', { class: 'acts' }, h('button', { class: 'btn primary', onclick: () => openRun(app.slug, r.id) }, 'Open run', icon('arrow'))));
   }
 
@@ -583,7 +596,9 @@
   // score stay free, and this card shows them as the reason to buy.
   const usd0 = (n) => `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
   const locked = (app) => !!app.cloud?.pass && !app.cloud.pass.unlocked;
-  const claudeLeft = (app) => app.cloud?.pass?.pass?.claude?.left ?? Infinity;
+  // Tokens left on the app's pass (Infinity when payments are off or free).
+  const tokensLeft = (app) => app.cloud?.pass?.pass?.tokens?.left ?? Infinity;
+  const usedUp = (app) => !!app.cloud?.pass?.pass?.tokens?.usedUp;
   const buyPass = (slug) => (e) => busy(e.currentTarget, async () => {
     const { url } = await post(`/api/apps/${slug}/pass`);
     location.href = url;
@@ -594,16 +609,17 @@
     const p = app.cloud?.pass;
     if (!p?.enabled || p.free) return null;
     if (p.pass) {
-      const t = p.pass.claude;
-      const share = t.included ? Math.min(100, Math.round((100 * t.used) / t.included)) : 100;
+      const t = p.pass.tokens;
+      // The bar counts what open runs may still spend too, like what's left does.
+      const share = t.included ? Math.min(100, Math.round((100 * (t.included - t.left)) / t.included)) : 100;
       return h('section', { class: 'card pass on' },
         h('div', { class: 'card-head' }, icon('rocket'), h('h2', {}, 'Launch Pass'), h('span', { class: 'pill sm good' }, 'Active'), h('span', { class: 'end sub' }, `Bought ${ago(p.pass.at)}`)),
         h('div', { class: 'card-body' },
           h('div', { class: 'pass-meter' },
-            h('div', { class: 'small' }, `Claude time: ${usd(t.used)} of ${usd0(t.included)} used`),
-            h('div', { class: `bar${share >= 90 ? ' low' : ''}`, role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': String(t.included), 'aria-valuenow': String(t.used), 'aria-label': 'Claude time used' }, h('span', { class: `fill w${Math.round(share / 5) * 5}` }))),
-          t.left < 1 ? h('div', { class: 'row' },
-            h('span', { class: 'small grow' }, `The Claude time on this pass is used up. Another pass adds ${usd0(p.price.claudeUsd)} more.`),
+            h('div', { class: 'small' }, [`${num(t.used)} of ${tok(t.included)} used`, t.held ? `${num(t.held)} held for the run going now` : null, `${num(t.left)} left`].filter(Boolean).join(' · ')),
+            h('div', { class: `bar${share >= 90 ? ' low' : ''}`, role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': String(t.included), 'aria-valuenow': String(t.included - t.left), 'aria-label': 'Tokens used or held for runs' }, h('span', { class: `fill w${Math.round(share / 5) * 5}` }))),
+          t.usedUp ? h('div', { class: 'row' },
+            h('span', { class: 'small grow' }, `The tokens on this pass are used up. Another pass adds ${tok(p.price.tokens)}.`),
             h('button', { class: 'btn', onclick: buyPass(app.slug) }, icon('rocket'), `Add a pass · ${usd0(p.price.usd)}`)) : null));
     }
     const now = app.cloud?.report?.now;
@@ -622,7 +638,7 @@
           h('div', { class: 'k' }, 'The pass adds'),
           h('ul', { class: 'pass-list' },
             p.includes.map((x) => h('li', { key: x }, icon('check'), h('span', {}, x))),
-            h('li', { key: 'claude' }, icon('check'), h('span', {}, `${usd0(p.price.claudeUsd)} of Claude time included`))),
+            h('li', { key: 'tokens' }, icon('check'), h('span', {}, `${tok(p.price.tokens)} for runs included`))),
           h('div', { class: 'row' },
             h('button', { class: 'btn primary', onclick: buyPass(app.slug) }, icon('rocket'), `Get the Launch Pass · ${usd0(p.price.usd)}`)),
           p.testMode ? h('p', { class: 'small pass-test' }, 'Stripe test mode: pay with 4242 4242 4242 4242, any future date and any CVC.') : null)));
@@ -811,10 +827,10 @@
     if (!Object.keys(C.pick).length) for (const s of steps) C.pick[s.id] = !['done', 'skipped'].includes(s.status);
     const chosen = steps.filter((s) => C.pick[s.id]);
     const missing = app.accounts.filter((a) => !a.connected);
-    const picked = models().some((m) => m.id === C.model) ? C.model : C.me?.models?.default;
+    const picked = tiers().some((t) => t.id === C.tier) ? C.tier : C.me?.tiers?.default;
     const mode = app.cloud?.source?.type === 'github' && C.me?.github.token ? 'github' : 'upload';
     const start = (e) => busy(e.currentTarget, async () => {
-      await startRun(app.slug, { steps: chosen.map((s) => s.id), note: C.note, model: picked });
+      await startRun(app.slug, { steps: chosen.map((s) => s.id), note: C.note, tier: picked });
       C.note = '';
     });
     return h('section', { class: 'card launch' },
@@ -822,7 +838,7 @@
         orb('idle', true),
         h('div', { class: 'grow' },
           h('h2', {}, 'Start a run'),
-          h('p', {}, 'Claude works in a private cloud sandbox with a copy of your code, following the same skills as the Claude Code plugin. It asks you here before anything that spends money, changes DNS or goes live.'),
+          h('p', {}, `${ai()} works in a private cloud sandbox with a copy of your code, following the same skills as the Liftoff plugin. It asks you here before anything that spends money, changes DNS or goes live.`),
           h('ul', { class: 'facts-inline' },
             h('li', {}, icon(mode === 'github' ? 'pr' : 'download'), mode === 'github' ? `Changes go on a new branch with a draft pull request on ${app.cloud.source.fullName}.` : 'Changes come back as a patch and an updated zip to download.'),
             h('li', {}, icon('shield'), 'Connected accounts are used through placeholders. Real keys stay on the server.')))),
@@ -839,20 +855,20 @@
             h('input', { type: 'checkbox', checked: !!C.pick[s.id], onchange: (e) => { C.pick[s.id] = e.currentTarget.checked; render(); } }),
             h('span', { class: 't' }, h('b', {}, s.label), h('span', { class: 'small' }, done ? Board.STEP_WORD[s.status] : s.waitingOn?.length ? `Waits on ${s.waitingOn.map((id) => stepLabel(app, id)).join(', ')}` : s.note || 'Not started')));
         })),
-        models().length > 1 ? [
-          h('div', { class: 'sec-head' }, h('span', { class: 'sec-title' }, 'Model')),
-          h('div', { class: 'picker models', role: 'radiogroup', 'aria-label': 'Model' }, models().map((m) => h('label', { class: 'pick spot' + (m.id === picked ? ' on' : ''), key: m.id },
-            h('input', { type: 'radio', name: 'run-model', value: m.id, checked: m.id === picked, onchange: () => { C.model = m.id; render(); } }),
-            h('span', { class: 't' }, h('b', {}, m.label, m.id === C.me.models.default ? h('span', { class: 'hint' }, ' (default)') : null), h('span', { class: 'small' }, m.hint))))),
+        tiers().length > 1 ? [
+          h('div', { class: 'sec-head' }, h('span', { class: 'sec-title' }, 'Mode')),
+          h('div', { class: 'picker models', role: 'radiogroup', 'aria-label': 'Mode' }, tiers().map((t) => h('label', { class: 'pick spot' + (t.id === picked ? ' on' : ''), key: t.id },
+            h('input', { type: 'radio', name: 'run-tier', value: t.id, checked: t.id === picked, onchange: () => { C.tier = t.id; render(); } }),
+            h('span', { class: 't' }, h('b', {}, t.label, t.id === C.me.tiers.default ? h('span', { class: 'hint' }, ' (default)') : null), h('span', { class: 'small' }, t.hint))))),
         ] : null,
-        h('label', { class: 'field' }, h('span', {}, 'Note for Claude ', h('span', { class: 'hint' }, '(optional)')),
-          h('textarea', { class: 'in', oninput: (e) => { C.note = e.currentTarget.value; }, placeholder: 'Anything Claude should know? e.g. "Use Cloudflare, not Vercel" or "Price Pro at $8/month"', 'aria-label': 'Note for Claude', maxlength: '1000' }, C.note || '')),
+        h('label', { class: 'field' }, h('span', {}, `Note for ${ai()} `, h('span', { class: 'hint' }, '(optional)')),
+          h('textarea', { class: 'in', oninput: (e) => { C.note = e.currentTarget.value; }, placeholder: `Anything ${ai()} should know? e.g. "Use Cloudflare, not Vercel" or "Price Pro at $8/month"`, 'aria-label': `Note for ${ai()}`, maxlength: '1000' }, C.note || '')),
         locked(app) ? h('div', { class: 'launch-go' },
           h('button', { class: 'btn primary big', type: 'button', onclick: buyPass(app.slug) }, icon('rocket'), `Get the Launch Pass · ${usd0(app.cloud.pass.price.usd)}`),
-          h('span', { class: 'small' }, `Cloud runs are part of the Launch Pass, with ${usd0(app.cloud.pass.price.claudeUsd)} of Claude time included.`))
+          h('span', { class: 'small' }, `Cloud runs are part of the Launch Pass, with ${tok(app.cloud.pass.price.tokens)} included.`))
         : h('div', { class: 'launch-go' },
-          h('button', { class: 'btn primary big', type: 'button', disabled: !C.me?.claude.ok || !chosen.length || claudeLeft(app) < 1, onclick: start }, icon('play'), chosen.length === left.length ? 'Start the launch' : `Run ${chosen.length} step${chosen.length === 1 ? '' : 's'}`),
-          h('span', { class: 'small' }, claudeLeft(app) === Infinity ? `Budget ${usd(C.me?.limits.runBudgetUsd)} per run` : claudeLeft(app) < 1 ? 'This app’s Claude time is used up.' : `Up to ${usd(Math.min(C.me?.limits.runBudgetUsd ?? Infinity, claudeLeft(app)))} for this run · ${usd(claudeLeft(app))} of Claude time left on the pass`))));
+          h('button', { class: 'btn primary big', type: 'button', disabled: !C.me?.claude.ok || !chosen.length || usedUp(app), onclick: start }, icon('play'), chosen.length === left.length ? 'Start the launch' : `Run ${chosen.length} step${chosen.length === 1 ? '' : 's'}`),
+          h('span', { class: 'small' }, tokensLeft(app) === Infinity ? `Budget ${tok(C.me?.limits.runBudgetTokens)} per run` : usedUp(app) ? 'This app’s tokens are used up.' : `Up to ${tok(Math.min(C.me?.limits.runBudgetTokens ?? Infinity, tokensLeft(app)))} for this run · ${tok(tokensLeft(app))} left on the pass`))));
   }
 
   async function startRun(slug, body) {
@@ -951,7 +967,7 @@
     const key = `p-${run.id}-${p.id}`;
     if (p.kind === 'question') {
       return h('div', { class: 'ask-card', key },
-        h('div', { class: 'ask-top' }, h('span', { class: 'ask-badge' }, icon('flag'), 'Claude asks'), h('time', {}, ago(p.at))),
+        h('div', { class: 'ask-top' }, h('span', { class: 'ask-badge' }, icon('flag'), `${ai()} asks`), h('time', {}, ago(p.at))),
         h('div', { class: 'ask-q rich' }, rich(p.text)),
         p.options?.length ? h('div', { class: 'chips' }, p.options.map((o) => h('button', { class: 'chip', type: 'button', onclick: (e) => answer(run, p, o, e.currentTarget) }, o))) : null,
         h('form', { class: 'ask-form', onsubmit: (e) => {
@@ -964,14 +980,14 @@
     }
     return h('div', { class: 'ask-card approve', key },
       h('div', { class: 'ask-top' },
-        h('span', { class: 'ask-badge' }, icon(p.kind === 'secret' ? 'key' : 'shield'), p.kind === 'secret' ? 'Copy a key to GitHub' : `Claude asks before using ${p.tool}`),
+        h('span', { class: 'ask-badge' }, icon(p.kind === 'secret' ? 'key' : 'shield'), p.kind === 'secret' ? 'Copy a key to GitHub' : `${ai()} asks before using ${p.tool}`),
         h('time', {}, ago(p.at))),
       h('div', { class: 'ask-q' }, p.text),
       p.detail && p.kind === 'approval' ? h('pre', { class: 'cmd' }, p.detail) : null,
       h('div', { class: 'ask-actions' },
         h('button', { class: 'btn good', type: 'button', onclick: (e) => decide(run, p, true, e) }, icon('check'), 'Allow'),
         h('button', { class: 'btn', type: 'button', onclick: (e) => decide(run, p, false, e) }, 'Decline'),
-        h('input', { class: 'in grow', name: 'reason', type: 'text', placeholder: 'Why not? (optional, shown to Claude)', 'aria-label': 'Reason' })));
+        h('input', { class: 'in grow', name: 'reason', type: 'text', placeholder: `Why not? (optional, shown to ${ai()})`, 'aria-label': 'Reason' })));
   }
 
   // Turn the run's events into thread rows: { side, key, node }.
@@ -1047,8 +1063,8 @@
     if (run.status === 'budget') {
       rows.push({ side: 'claude', key: 'budget', card: true, node: h('div', { class: 'ask-card' },
         h('div', { class: 'ask-top' }, h('span', { class: 'ask-badge' }, icon('flag'), 'Paused at budget')),
-        h('div', { class: 'ask-q' }, `This run reached its ${usd(run.budgetUsd)} budget and paused.`),
-        h('div', { class: 'ask-actions' }, h('button', { class: 'btn primary', type: 'button', onclick: (e) => busy(e.currentTarget, async () => { C.run = await post(`/api/apps/${C.slug}/runs/${run.id}/budget`, { addUsd: 10 }); render(); }) }, 'Add $10 and continue'))) });
+        h('div', { class: 'ask-q' }, `This run used its budget of ${tok(run.budgetTokens)} and paused.`),
+        h('div', { class: 'ask-actions' }, h('button', { class: 'btn primary', type: 'button', onclick: (e) => busy(e.currentTarget, async () => { C.run = await post(`/api/apps/${C.slug}/runs/${run.id}/budget`, { addTokens: topUp() }); render(); }) }, `Add ${tok(topUp())} and continue`))) });
     }
     // Tool work still going on: the newest group shows a spinner.
     const tail = rows[rows.length - 1];
@@ -1056,7 +1072,7 @@
     if (working) {
       rows.push({ side: 'claude', key: 'typing', node: h('div', { class: 'bubble typing', role: 'status' },
         h('span', { class: 'dots' }, h('i'), h('i'), h('i')),
-        h('span', { class: 'shimmer' }, run.status === 'starting' ? 'Setting up the sandbox' : 'Claude is working')) });
+        h('span', { class: 'shimmer' }, run.status === 'starting' ? 'Setting up the sandbox' : `${ai()} is working`)) });
     }
     return rows;
   }
@@ -1086,7 +1102,7 @@
       const last = rows[i + 1]?.side !== r.side;
       out.push(h('div', { class: `cmsg ${r.side}${first ? ' first' : ''}${last ? ' last' : ''}${r.card || r.group ? ' wide' : ''}${isNew}`, key: `${run.id}-${r.key}` },
         r.side === 'claude' ? h('div', { class: 'gutter' }, last ? orb(r.key === 'typing' ? 'running' : run.status === 'needs-you' && r.card ? 'needs-you' : 'idle') : null) : null,
-        h('div', { class: 'col' }, first && r.side === 'claude' && r.key !== 'typing' ? h('div', { class: 'who-line' }, 'Claude') : null, r.node)));
+        h('div', { class: 'col' }, first && r.side === 'claude' && r.key !== 'typing' ? h('div', { class: 'who-line' }, ai()) : null, r.node)));
     });
     return out;
   }
@@ -1133,10 +1149,10 @@
   function chatPanel(app, run) {
     const live = LIVE.has(run.status);
     const disabled = run.status === 'needs-you' || run.status === 'budget' || run.status === 'starting';
-    const placeholder = run.status === 'needs-you' ? 'Answer Claude above first'
+    const placeholder = run.status === 'needs-you' ? `Answer ${ai()} above first`
       : run.status === 'budget' ? 'Raise the budget to keep going'
-        : run.status === 'starting' ? 'Claude is setting up…'
-          : live ? 'Message Claude…' : 'Message Claude to keep going…';
+        : run.status === 'starting' ? `${ai()} is setting up…`
+          : live ? `Message ${ai()}…` : `Message ${ai()} to keep going…`;
     const status = run.status === 'starting' ? 'Setting up a private sandbox'
       : run.status === 'running' ? 'Working on your app'
         : run.status === 'needs-you' ? `Waiting on you (${run.pending.length})`
@@ -1144,7 +1160,7 @@
             : run.status === 'finished' ? 'Finished. Send a message to keep going.'
               : RUN_WORD[run.status] || run.status;
     const thread = h('div', {
-      class: 'thread', role: 'log', 'aria-live': 'polite', 'aria-label': 'Conversation with Claude', tabindex: '0',
+      class: 'thread', role: 'log', 'aria-live': 'polite', 'aria-label': `Conversation with ${ai()}`, tabindex: '0',
       onscroll: (e) => {
         const t = e.currentTarget;
         if (Date.now() - C.autoScroll < 700) return;
@@ -1155,14 +1171,14 @@
     return h('section', { class: 'card chat' + (live ? ' live' : '') + (C.stick ? '' : ' scrolled'), key: `chat-${run.id}` },
       h('header', { class: 'chat-head' },
         orb(run.status),
-        h('div', { class: 'grow' }, h('div', { class: 'chat-name' }, 'Claude', run.model ? h('span', { class: 'pill sm' }, modelLabel(run.model)) : null), h('div', { class: 'small' }, status)),
+        h('div', { class: 'grow' }, h('div', { class: 'chat-name' }, ai(), run.tier ? h('span', { class: 'pill sm' }, tierLabel(run.tier)) : null), h('div', { class: 'small' }, status)),
         runPill(run.status, true)),
       h('div', { class: 'thread-wrap' }, thread,
         h('button', { class: 'jump', type: 'button', onclick: () => scrollToEnd(true), tabindex: C.stick ? '-1' : '0' }, icon('arrowDown'), 'Latest')),
       h('form', { class: 'composer', onsubmit: (e) => sendMessage(run, e) },
         h('div', { class: 'composer-box' + (disabled ? ' off' : '') },
           h('textarea', {
-            class: 'in', rows: '1', placeholder, 'aria-label': 'Message Claude', disabled,
+            class: 'in', rows: '1', placeholder, 'aria-label': `Message ${ai()}`, disabled,
             oninput: (e) => {
               C.draft = e.currentTarget.value;
               grow(e.currentTarget);
@@ -1180,17 +1196,17 @@
   }
 
   function runInfo(app, run) {
-    const spent = run.budgetUsd ? Math.min(100, ((run.cost || 0) / run.budgetUsd) * 100) : 0;
+    const spent = run.budgetTokens ? Math.min(100, ((run.tokens || 0) / run.budgetTokens) * 100) : 0;
     const ids = run.steps.length ? run.steps : null;
     const STEP_I = { done: 'checkCircle', skipped: 'minus', running: 'spinner', blocked: 'x' };
     return h('section', { class: 'card run-info' },
       h('div', { class: 'card-head' }, h('h2', {}, 'This run'), h('span', { class: 'end' }, h('span', { class: 'sub' }, `Started ${ago(run.createdAt)}`))),
       h('div', { class: 'card-body' },
         h('div', { class: 'spend' },
-          h('div', { class: 'spend-top' }, h('span', { class: 'spend-n' }, run.cost === null ? usd(0) : usd(run.cost)), h('span', { class: 'small' }, `of ${usd(run.budgetUsd)} budget`)),
-          h('div', { class: 'meter' }, h('span', { class: 'ok', style: { width: `${Math.max(spent, run.cost ? 2 : 0)}%` } }))),
+          h('div', { class: 'spend-top' }, h('span', { class: 'spend-n' }, num(run.tokens)), h('span', { class: 'small' }, `tokens of a ${num(run.budgetTokens)}-token budget`)),
+          h('div', { class: 'meter', role: 'meter', 'aria-label': 'Tokens used', 'aria-valuemin': '0', 'aria-valuemax': String(run.budgetTokens || 0), 'aria-valuenow': String(run.tokens || 0) }, h('span', { class: 'ok', style: { width: `${Math.max(spent, run.tokens ? 2 : 0)}%` } }))),
         h('dl', { class: 'kv' },
-          h('div', {}, h('dt', {}, 'Model'), h('dd', {}, run.model ? modelLabel(run.model) : '–')),
+          h('div', {}, h('dt', {}, 'Mode'), h('dd', {}, run.tier ? tierLabel(run.tier) : '–')),
           h('div', {}, h('dt', {}, 'Changes'), h('dd', {}, run.pr ? h('a', { href: run.pr.url, target: '_blank', rel: 'noopener' }, icon('pr'), `Pull request #${run.pr.number}`) : run.mode === 'github' ? 'Draft pull request' : 'Patch and zip'))),
         h('div', { class: 'sec-head' }, h('span', { class: 'sec-title' }, 'Steps')),
         ids ? h('ul', { class: 'run-steps' }, ids.map((id) => {
@@ -1202,15 +1218,15 @@
 
   function runView() {
     const app = appOf(C.slug);
-    if (!app) return h('div', { class: 'card empty' }, h('div', { class: 'tile' }, icon('play')), h('h2', {}, 'Pick an app'), h('p', {}, 'Open an app and choose Run with Claude.'));
+    if (!app) return h('div', { class: 'card empty' }, h('div', { class: 'tile' }, icon('play')), h('h2', {}, 'Pick an app'), h('p', {}, `Open an app and choose Run with ${ai()}.`));
     const run = C.run;
     const head = h('div', { class: 'page-head run-head' },
       Board.avatar(app, true),
-      h('div', { class: 'grow' }, h('h1', {}, app.name), h('p', {}, run ? (run.steps.length ? run.steps.map((id) => stepLabel(app, id)).join(', ') : 'All remaining steps') : 'Claude run')),
+      h('div', { class: 'grow' }, h('h1', {}, app.name), h('p', {}, run ? (run.steps.length ? run.steps.map((id) => stepLabel(app, id)).join(', ') : 'All remaining steps') : 'Launch run')),
       h('div', { class: 'actions' },
         run && LIVE.has(run.status) ? h('button', { class: 'btn', onclick: (e) => busy(e.currentTarget, async () => { C.run = await post(`/api/apps/${C.slug}/runs/${run.id}/stop`); render(); }) }, icon('stop'), 'Stop') : null,
-        run && !OPEN.has(run.status) && run.model !== STRONGEST && models().some((m) => m.id === STRONGEST) && C.me?.claude.ok
-          ? h('button', { class: 'btn', title: 'Start a new run for the same steps on Claude Opus 5.5', onclick: (e) => busy(e.currentTarget, () => startRun(C.slug, { steps: run.steps, note: run.note || '', model: STRONGEST })) }, icon('refresh'), 'Try again with Opus') : null,
+        run && !OPEN.has(run.status) && strongest() && run.tier !== strongest() && tiers().some((t) => t.id === strongest()) && C.me?.claude.ok
+          ? h('button', { class: 'btn', title: `Start a new run for the same steps in ${tierLabel(strongest())} mode`, onclick: (e) => busy(e.currentTarget, () => startRun(C.slug, { steps: run.steps, note: run.note || '', tier: strongest() })) }, icon('refresh'), `Try again with ${tierLabel(strongest())}`) : null,
         run && !OPEN.has(run.status) ? h('button', { class: 'btn', onclick: () => { C.runId = null; C.run = null; C.pick = {}; remember(); render(); } }, icon('plus'), 'New run') : null,
         h('button', { class: 'btn quiet', onclick: () => go('app', app.slug) }, `Back to ${app.name}`, icon('arrow'))));
 
@@ -1239,7 +1255,7 @@
       h('div', { class: 'card-head' }, h('h2', {}, 'Earlier runs'), h('span', { class: 'count' }, past.length)),
       h('div', { class: 'card-body rows' }, past.slice(0, 10).map((r) => h('div', { class: 'line', key: r.id, role: 'button', tabindex: '0', onclick: () => openRun(app.slug, r.id), onkeydown: (e) => { if (e.key === 'Enter') openRun(app.slug, r.id); } },
         h('div', { class: 'grow' }, h('div', { class: 'name' }, r.steps.length ? r.steps.map((id) => stepLabel(app, id)).join(', ') : 'All remaining steps'),
-          h('div', { class: 'small' }, `${ago(r.createdAt)} · ${usd(r.cost)}`)),
+          h('div', { class: 'small' }, `${ago(r.createdAt)} · ${tok(r.tokens)}`)),
         r.pr ? h('span', { class: 'pill sm' }, `PR #${r.pr.number}`) : null,
         runPill(r.status, true)))));
   }
@@ -1269,7 +1285,7 @@
       add: { title: 'Add an app', render: addView },
       settings: { title: 'Account settings', render: settingsView },
       records: { title: 'Run records', render: recordsView },
-      run: { get title() { const a = appOf(C.slug); return a ? `${a.name} · Claude run` : 'Claude run'; }, render: runView, key: () => `${C.slug}:${C.loading ? 'loading' : C.run?.id || 'new'}` },
+      run: { get title() { const a = appOf(C.slug); return a ? `${a.name} · Launch run` : 'Launch run'; }, render: runView, key: () => `${C.slug}:${C.loading ? 'loading' : C.run?.id || 'new'}` },
     },
     navExtra: () => h('button', { class: 'nav' + (state.view === 'add' ? ' on' : ''), onclick: () => go('add') }, icon('plus'), h('span', {}, 'Add an app')),
     sideFoot: () => C.me ? h('button', { class: 'nav who' + (state.view === 'settings' ? ' on' : ''), type: 'button', title: 'Account settings', onclick: () => go('settings') },
@@ -1283,30 +1299,32 @@
     appBadge: (a) => {
       const r = a.cloud?.run;
       if (!r) return null;
-      if (r.status === 'needs-you') return h('span', { class: 'pill warn sm', title: 'Claude needs you' }, '!');
-      if (r.status === 'running' || r.status === 'starting') return h('span', { class: 'status-dot run', title: 'Claude is working' });
+      if (r.status === 'needs-you') return h('span', { class: 'pill warn sm', title: `${ai()} needs you` }, '!');
+      if (r.status === 'running' || r.status === 'starting') return h('span', { class: 'status-dot run', title: `${ai()} is working` });
       return null;
     },
     emptyOverview: () => [
       h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Welcome to Liftoff Cloud'),
-        h('p', {}, 'Add your app to see what stands between it and real users. Then let Claude set it up, step by step, in the cloud.'))),
+        h('p', {}, `Add your app to see what stands between it and real users. Then let ${ai()} set it up, step by step, in the cloud.`))),
       addForms(),
     ],
     overviewIntro: (apps) => `${Board.plural(apps.length, 'app')} in Liftoff Cloud. Here is what needs you first.`,
     overviewActions: () => h('button', { class: 'btn primary', onclick: () => go('add') }, icon('plus'), 'Add an app'),
     accountAction,
-    accountsIntro: () => 'Add a key once and all your apps can use it. Keys are encrypted on the server, and Claude’s sandbox only sees placeholders that turn into the real key on the way to that service.',
+    accountsIntro: () => `Add a key once and all your apps can use it. Keys are encrypted on the server, and ${ai()}’s sandbox only sees placeholders that turn into the real key on the way to that service.`,
+    // Checklist items the assistant ticked say so by its name.
+    whoTicked: (by) => (by === 'claude' ? ai() : null),
     heroMeta: sourceLine,
     heroActions: (app) => [
       h('button', { class: 'btn', title: 'Fetch the code again and rescan it', onclick: (e) => busy(e.currentTarget, async () => { toast('Rescanning…'); await post(`/api/apps/${app.slug}/rescan`); await refresh(true); toast('Rescanned'); }) }, icon('refresh'), 'Rescan'),
-      h('button', { class: 'btn primary', onclick: () => openRun(app.slug, app.cloud?.run && OPEN.has(app.cloud.run.status) ? app.cloud.run.id : null) }, icon('play'), app.cloud?.run && OPEN.has(app.cloud.run.status) ? 'Open run' : 'Run with Claude'),
+      h('button', { class: 'btn primary', onclick: () => openRun(app.slug, app.cloud?.run && OPEN.has(app.cloud.run.status) ? app.cloud.run.id : null) }, icon('play'), app.cloud?.run && OPEN.has(app.cloud.run.status) ? 'Open run' : `Run with ${ai()}`),
     ],
     afterHero: (app) => [runCard(app), passCard(app), scanCard(app), proofCard(app), reportCard(app)],
     nextActionButton: (app, a) => (a.skill || a.command ? h('button', { class: 'btn', onclick: () => {
       const ids = app.steps.filter((s) => s.skill === a.skill && !['done', 'skipped'].includes(s.status)).map((s) => s.id);
       openRun(app.slug).then(() => { if (ids.length && !C.run) { C.pick = Object.fromEntries(app.steps.map((s) => [s.id, ids.includes(s.id)])); render(); } });
-    } }, icon('play'), 'Do it with Claude') : null),
-    stepsHeadEnd: (app) => h('button', { class: 'btn', onclick: () => openRun(app.slug) }, icon('play'), 'Run with Claude'),
+    } }, icon('play'), `Do it with ${ai()}`) : null),
+    stepsHeadEnd: (app) => h('button', { class: 'btn', onclick: () => openRun(app.slug) }, icon('play'), `Run with ${ai()}`),
     mainBottom: settingsCard,
     afterRender: () => {
       const ta = document.querySelector('.composer textarea');

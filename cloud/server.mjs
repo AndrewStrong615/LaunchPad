@@ -16,6 +16,8 @@ import { Billing } from './lib/billing.mjs';
 import { Records } from './lib/records.mjs';
 import { createApp } from './lib/app.mjs';
 import { provision } from './lib/provision.mjs';
+import { modelFor } from './lib/agent.mjs';
+import { toTokens, tokenWord } from './lib/brand.mjs';
 
 // Everything the routes need. Tests pass fakes for `anthropic`, `fetch`
 // (GitHub, and Liftoff's own Stripe account), `safeFetch` (the services
@@ -73,9 +75,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   console.log(`  sign-in: ${ctx.github.oauthEnabled ? 'GitHub' : 'GitHub not set up'}${config.devLogin ? ' + local dev login' : ''}`);
   console.log(`  purchase test: ${ctx.proof.enabled ? `test browser at ${config.proof.url}` : config.proof.problem || 'off (set LIFTOFF_PROOF_URL and LIFTOFF_PROOF_SECRET)'}`);
   const pay = config.billing;
-  console.log(`  Launch Pass: ${ctx.billing.enabled ? `$${pay.passUsd} with $${pay.claudeUsd} of Claude time (Stripe ${/^(sk|rk)_live_/.test(pay.secretKey) ? 'live' : 'test'} mode${pay.webhookSecret ? '' : ', no webhook secret'})` : 'off, everything is free (set LIFTOFF_STRIPE_SECRET_KEY)'}`);
+  console.log(`  Launch Pass: ${ctx.billing.enabled ? `$${pay.passUsd} with $${pay.claudeUsd} of Claude time, shown as ${tokenWord(toTokens(pay.claudeUsd, config.tokensPerUsd))} (Stripe ${/^(sk|rk)_live_/.test(pay.secretKey) ? 'live' : 'test'} mode${pay.webhookSecret ? '' : ', no webhook secret'})` : 'off, everything is free (set LIFTOFF_STRIPE_SECRET_KEY)'}`);
+  console.log(`  assistant: ${config.assistant}, ${config.tokensPerUsd} tokens to the dollar of Claude time`);
   console.log(`  cloud runs: ${ready.ok ? `ready on ${ctx.runs.defaultModel()}${resumed ? `, following ${resumed} run(s)` : ''}` : ready.why}`);
-  if (config.runModel && config.runModel !== ctx.runs.defaultModel()) console.log(`  LIFTOFF_RUN_MODEL=${config.runModel} isn't one of the models runs can use, so runs default to ${ctx.runs.defaultModel()}`);
+  if (config.runModel && !modelFor(config.runModel)) console.log(`  LIFTOFF_RUN_MODEL=${config.runModel} isn't one of the modes or models runs can use, so runs default to ${ctx.runs.defaultModel()}`);
   for (const sig of ['SIGTERM', 'SIGINT']) {
     process.once(sig, async () => {
       await stop();
