@@ -1186,6 +1186,19 @@
     }
   }
 
+  // What the badge says now, and for how long (lib/report.mjs badgeNow).
+  function badgeSays(app, b) {
+    const links = 'It links to the newest report.';
+    if (!b) return links;
+    if (b.live && b.certified) return `Says “launch certified · watched” while Liftoff watches this app and every required check keeps passing on its daily run. ${links}`;
+    if (b.live) return `Says “launch report” for now: not every required check passes on Liftoff’s daily run. It says certified again once they do. ${links}`;
+    const pro = app.cloud?.watch?.pro;
+    const proLater = pro && ['none', 'ended'].includes(pro.via) ? ' Pro keeps it live after that, for as long as every required check passes.' : '';
+    if (b.certified) return `Says “launch certified” with the newest report’s date until ${longDay(b.until)}, 30 days after it.${proLater} ${links}`;
+    if (b.until) return `The certificate ended on ${longDay(b.until)}, so it says “launch report”. A new certified report, or Pro, brings it back. ${links}`;
+    return `Says “launch report” until a report is certified, then “launch certified”. ${links}`;
+  }
+
   function reportCard(app) {
     const r = app.cloud?.report;
     if (!r) return null;
@@ -1224,9 +1237,9 @@
           latest ? h('a', { class: 'btn', href: latest.url, target: '_blank', rel: 'noopener' }, 'Open the report', icon('external')) : null),
         badge ? h('div', { class: 'report-badge' },
           h('div', { class: 'k' }, 'Badge for your site'),
-          h('div', { class: 'small' }, latest?.certified ? `Shows “launch certified” with the date of the newest report, and links to it.` : 'Shows “launch report” until a report is certified, then the date. It links to the newest report.'),
+          h('div', { class: 'small' }, badgeSays(app, badge.says)),
           h('div', { class: 'row' },
-            h('img', { class: 'badge-img', src: `${new URL(badge.image).pathname}?v=${latest?.id || 'none'}`, alt: 'Your Liftoff badge', height: '20' }),
+            h('img', { class: 'badge-img', src: `${new URL(badge.image).pathname}?v=${latest?.id || 'none'}-${badge.says?.live ? 'l' : 's'}${badge.says?.certified ? 'c' : 'n'}`, alt: 'Your Liftoff badge', height: '20' }),
             h('span', { class: 'small grow' }, `${badge.clicks} ${badge.clicks === 1 ? 'visit' : 'visits'} from the badge`)),
           h('div', { class: 'row' },
             h('input', { class: 'in mono grow', type: 'text', readonly: true, value: badgeCode(badge), 'aria-label': 'Badge code', onfocus: (e) => e.currentTarget.select() }),
@@ -1294,10 +1307,11 @@
     });
     const planBlock = (text, buttons, tone = '') => h('div', { class: `watch-plan${tone ? ` ${tone}` : ''}` },
       h('p', { class: 'small' }, text), buttons.length ? h('div', { class: 'row' }, buttons) : null);
+    const badgeLine = !!app.cloud?.report?.badge;
     const plan = () => {
       const pro = w.pro;
       if (pro?.via === 'pass') {
-        return planBlock(`Included with the Launch Pass until ${shortDay(pro.until)}. To keep watching after that, add Pro (${price}): nothing is charged before ${shortDay(pro.until)}.`,
+        return planBlock(`Included with the Launch Pass until ${shortDay(pro.until)}. To keep watching after that${badgeLine ? ', and the badge live' : ''}, add Pro (${price}): nothing is charged before ${shortDay(pro.until)}.`,
           [h('button', { class: 'btn', onclick: startPro }, icon('activity'), 'Add Pro')]);
       }
       const p = pro?.via === 'pro' ? pro.plan : null;
@@ -1315,7 +1329,7 @@
       if (w.why === 'not-pro') {
         const ended = w.pro?.via === 'ended';
         body.push(h('p', { class: 'small watch-note' }, ended
-          ? `The 30 days of watching that came with this app’s Launch Pass ended on ${shortDay(w.pro.until)}. Pro keeps it going for ${price}, and you can cancel any time.`
+          ? `The 30 days of watching that came with this app’s Launch Pass ended on ${shortDay(w.pro.until)}. Pro keeps it going for ${price}${badgeLine ? ', with the “Launch certified” badge live while every check passes' : ''}, and you can cancel any time.`
           : `Watching is part of Pro: ${price} for this app, and you can cancel any time. A Launch Pass includes the first 30 days.`),
         h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: startPro }, icon('activity'), `${ended ? 'Keep watching' : 'Start Pro'} · ${price}`)));
       }

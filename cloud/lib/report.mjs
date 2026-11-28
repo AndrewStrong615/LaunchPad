@@ -3,7 +3,9 @@
 // badge for the app's own site, which links back to it.
 //
 // Certified means every required check ran on Liftoff's server and passed in
-// the last 30 days. Items Claude or the owner ticked by hand are listed as
+// the last 30 days. The badge follows the newest report for those 30 days;
+// while Liftoff watches the app (Pro, lib/watch.mjs), it follows the daily
+// checks instead, so it stays true for as long as the app is watched. Items Claude or the owner ticked by hand are listed as
 // reported, never as proven, and a skipped check never counts as a pass.
 // Other checks that fail are listed (without details) and lower the score,
 // but don't block: pay-live, for one, fails on the test key the purchase
@@ -211,10 +213,29 @@ export function deleteReport(ctx, uid, slug, id) {
   });
 }
 
-// The badge shows the newest report: certified with its date, or a plain
-// "launch report" that claims nothing.
+// The newest report, which the badge links to.
 export function latestReport(state) {
   return state.report?.history?.[0] || null;
+}
+
+// What the badge says now: { certified, live, at, until, uptime }.
+// - Watched (Pro, or the days that come with the Launch Pass) once the first
+//   uptime check is in: live. Certified while every required check still
+//   passes on Liftoff's daily run and the site isn't down, whatever the
+//   newest report said. at is the last full check.
+// - Not watched: the newest report, if it was certified, for the proof
+//   window (until), then a plain "launch report" that claims nothing.
+export function badgeNow(ctx, uid, state, now = Date.now()) {
+  const latest = latestReport(state);
+  if (!latest) return { certified: false, live: false, at: null, until: null, uptime: null };
+  const w = ctx.watch.view(uid, state);
+  if (w.watching && w.uptime) {
+    const a = assess(state, { now, stripeConnected: hasStripe(ctx.store, uid), uses: usesFor(ctx.store, uid, state) });
+    const at = [latest.at, w.daily?.at].filter(Boolean).sort().at(-1);
+    return { certified: a.certified && w.status !== 'down', live: true, at, until: null, uptime: w.uptime.month ?? null };
+  }
+  const until = Date.parse(latest.at) + PROOF_MAX_AGE_DAYS * DAY;
+  return { certified: !!latest.certified && now < until, live: false, at: latest.at, until: latest.certified ? new Date(until).toISOString() : null, uptime: null };
 }
 
 // Badge clicks are kept beside the reports, not in the app's state, so a
@@ -248,7 +269,7 @@ export function reportView(ctx, uid, state) {
     now: { certified: a.certified, missing: a.missing, score: a.score, counts: a.counts, unnamed: a.checks.filter(unnamedInPublic).length },
     latest: history[0] || null,
     history,
-    badge: badgeId ? { url: `${base}/b/${badgeId}`, image: `${base}/b/${badgeId}.svg`, clicks: badgeClicks(ctx, uid, state.slug) } : null,
+    badge: badgeId ? { url: `${base}/b/${badgeId}`, image: `${base}/b/${badgeId}.svg`, clicks: badgeClicks(ctx, uid, state.slug), says: badgeNow(ctx, uid, state) } : null,
   };
 }
 
@@ -256,14 +277,16 @@ export function reportView(ctx, uid, state) {
 
 const textWidth = (s) => Math.round([...s].reduce((w, ch) => w + (/[il.,:'|!]/.test(ch) ? 3.2 : /[mwMW]/.test(ch) ? 9.5 : /[A-Z0-9]/.test(ch) ? 7.4 : 6.3), 0));
 
-export function badgeSvg(latest) {
+// b is badgeNow()'s answer (or a report entry: { certified, at }).
+export function badgeSvg(b) {
   const left = 'Liftoff';
-  const right = latest?.certified ? `launch certified · ${new Date(latest.at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}` : 'launch report';
+  const date = (iso) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  const right = !b?.certified ? 'launch report' : b.live ? 'launch certified · watched' : `launch certified · ${date(b.at)}`;
   const lw = textWidth(left) + 16;
   const rw = textWidth(right) + 16;
   const w = lw + rw;
-  const color = latest?.certified ? '#0c9466' : '#6b7280';
-  const label = latest?.certified ? `Liftoff: ${right}` : 'Liftoff launch report';
+  const color = b?.certified ? '#0c9466' : '#6b7280';
+  const label = !b?.certified ? 'Liftoff launch report' : b.live ? `Liftoff: launch certified, watched and checked again ${date(b.at)}` : `Liftoff: ${right}`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="20" role="img" aria-label="${label}"><title>${label}</title>`
     + `<clipPath id="r"><rect width="${w}" height="20" rx="4" fill="#fff"/></clipPath><g clip-path="url(#r)">`
     + `<rect width="${lw}" height="20" fill="#1f2328"/><rect x="${lw}" width="${rw}" height="20" fill="${color}"/></g>`
@@ -291,7 +314,9 @@ function section(title, intro, rows, { folded = false, count = rows.length } = {
 // A public page shouldn't point at a weakness: failed checks show no details,
 // and security checks that haven't passed are counted, not named. Reports
 // made before this rule follow it too, since it applies as the page is drawn.
-export function renderReport(report, { home = '/', assistant = DEFAULT_ASSISTANT } = {}) {
+// now: badgeNow() for the app, when this is its newest report; newer: the
+// newest report's id, when this one isn't.
+export function renderReport(report, { home = '/', assistant = DEFAULT_ASSISTANT, now = null, newer = null } = {}) {
   const r = report;
   const by = (who) => (who === 'claude' ? assistant : BY[who]);
   const unnamed = r.checks.filter(unnamedInPublic).length;
@@ -330,6 +355,12 @@ export function renderReport(report, { home = '/', assistant = DEFAULT_ASSISTANT
   const verdict = r.certified
     ? `<div class="verdict ok">${TICK}<div><div class="v">Launch certified</div><div class="d">Every required check ran on Liftoff's server and passed.</div></div></div>`
     : `<div class="verdict">${DOT}<div><div class="v">Not certified yet</div><div class="d">${esc(r.missing.length)} thing${r.missing.length === 1 ? '' : 's'} still to prove before Liftoff can certify this launch.</div></div></div>`;
+  // Where things stand since this snapshot. Never why something stopped passing.
+  let since = '';
+  if (newer) since = `<p class="since">${DOT}<span>This is an earlier report. <a href="${esc(`/r/${newer}`)}">See the newest one</a>.</span></p>`;
+  else if (now?.live && now.certified) since = `<p class="since ok">${TICK}<span>Liftoff is watching ${esc(r.app.name)}: every required check passed again on ${esc(longDate(now.at))}${now.uptime !== null && now.uptime !== undefined ? `, and the site was up ${esc(now.uptime)}% of the last 30 days` : ''}.</span></p>`;
+  else if (now?.live) since = `<p class="since">${DOT}<span>Liftoff is watching ${esc(r.app.name)} and checks it again every day. Not every required check passes right now, so the badge doesn't say certified until they do.</span></p>`;
+  else if (r.certified && now && !now.certified) since = `<p class="since">${DOT}<span>Liftoff certifies a launch for ${PROOF_MAX_AGE_DAYS} days after its report, or for as long as Liftoff keeps watching the app. This certificate ended on ${esc(longDate(now.until))}.</span></p>`;
 
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex"><title>${esc(r.app.name)}: launch report · Liftoff</title>
@@ -337,6 +368,7 @@ export function renderReport(report, { home = '/', assistant = DEFAULT_ASSISTANT
 <header class="top"><a class="brand" href="${esc(home)}">Liftoff</a><span>Launch report</span></header>
 <h1>${esc(r.app.name)}</h1><p class="meta">${[esc(r.app.framework), esc((r.app.platforms || []).join(', ')), live].filter(Boolean).join(' · ')}</p>
 ${verdict}
+${since}
 ${tailored}
 <div class="facts"><div><div class="k">Checked</div><div class="v">${esc(longDate(r.createdAt))}</div></div><div><div class="k">Launch score</div><div class="v">${esc(r.score)}<span>/100</span></div></div><div><div class="k">Proven by Liftoff</div><div class="v">${esc(r.counts.proven)}<span> of ${esc(r.counts.total)}</span></div></div></div>
 ${section('Proven by Liftoff', "Each of these was checked from Liftoff's own server against the live services, not ticked by hand.", proven)}
