@@ -1,11 +1,12 @@
 // Watching launched apps (lib/watch.mjs): who is watched, uptime and the
 // down/up incidents, the daily run of every check, certificate and domain
-// expiry, pausing, and what the Flight Board gets.
+// expiry, pausing, what the Flight Board gets, and alerts to Slack or Discord.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { zipDirectory } from '../lib/archive.mjs';
 import { registrableDomain } from '../lib/watch.mjs';
+import { validateHook } from '../lib/alerts.mjs';
 import { FIXTURES, signIn, startTest } from './helpers.mjs';
 
 const MIN = 60_000;
@@ -14,9 +15,13 @@ const LIVE = 'https://invoicely.app';
 
 // The live site as the checks see it. `site.status` is what the home page answers.
 function fakeSite() {
-  const site = { status: 200, legal: 200, calls: [] };
-  site.fetch = async (url) => {
+  const site = { status: 200, legal: 200, calls: [], hooks: [], hookStatus: 200 };
+  site.fetch = async (url, opts = {}) => {
     const u = new URL(url);
+    if (u.host === 'hooks.slack.com' || u.host === 'discord.com') {
+      site.hooks.push({ url: u.href, body: JSON.parse(opts.body) });
+      return new Response('ok', { status: site.hookStatus });
+    }
     site.calls.push(u.href);
     if (u.host !== 'invoicely.app' && u.host !== 'www.invoicely.app') return new Response('nope', { status: 404 });
     if (u.protocol === 'http:') return new Response(null, { status: 301, headers: { location: `https://invoicely.app${u.pathname}` } });
@@ -240,4 +245,98 @@ test('the domain whose expiry is watched', () => {
   assert.equal(registrableDomain('invoicely.vercel.app'), null, "the platform's domain, not the app's");
   assert.equal(registrableDomain('my-app.onrender.com'), null);
   assert.equal(registrableDomain('203.0.113.9'), null);
+});
+
+const SLACK = 'https://hooks.slack.com/services/T000AAAA/B000BBBB/abcdefghijklmnopqrstuvwx';
+const DISCORD = 'https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz_0123456789-ABCDEFGHIJ';
+
+test('alert channels are Slack and Discord webhooks, nothing else', () => {
+  assert.deepEqual(validateHook(` ${SLACK} `), { url: SLACK, kind: 'slack' });
+  assert.deepEqual(validateHook(`${DISCORD}?wait=true`), { url: DISCORD, kind: 'discord' });
+  for (const bad of ['', 'hooks.slack.com/services/T/B/C', SLACK.replace('https', 'http'), 'https://hooks.slack.com.evil.example/services/T000AAAA/B000BBBB/abc', 'https://evil.example/api/webhooks/1/2', 'https://hooks.slack.com/services/../../x', 'https://hooks.slack.com:8443/services/T000AAAA/B000BBBB/abcdefghijklmnopqrstuvwx', 'https://user:pw@discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz']) {
+    assert.throws(() => validateHook(bad), /Slack incoming webhook/, bad);
+  }
+});
+
+test('an incident opening and closing is sent to Slack, and the address never comes back', async () => {
+  const { t, me, site, slug, watch, later, w } = await setup();
+  try {
+    // A webhook that doesn't take the first message isn't saved.
+    site.hookStatus = 404;
+    let r = await me.post('/api/me/alerts', { url: SLACK });
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, /Slack didn’t take the message \(it answered 404\)/);
+    assert.equal((await me.get('/api/me')).body.alerts.channel, null);
+
+    site.hookStatus = 200;
+    r = await me.post('/api/me/alerts', { url: SLACK });
+    assert.equal(r.status, 200, r.text);
+    assert.equal(r.body.channel.label, 'Slack');
+    assert.equal(r.body.channel.hint, 'uvwx');
+    assert.match(site.hooks.at(-1).body.text, /Liftoff is connected/);
+    const me1 = await me.get('/api/me');
+    assert.ok(!me1.text.includes(SLACK), 'the webhook address is never sent back');
+    assert.ok(!JSON.stringify(t.ctx.store.getSecrets(t.ctx.store.listUsers()[0])).includes('abcdefghijklmnop'), 'kept encrypted');
+    assert.equal((await me.post('/api/me/alerts', { url: 'https://evil.example/hook' })).status, 400);
+
+    await me.post(`/api/apps/${slug}/live`, { url: LIVE });
+    await w.runDue();
+    const sent = site.hooks.length;
+    site.status = 503;
+    later(5 * MIN);
+    await w.runDue();
+    later(5 * MIN);
+    await w.runDue();
+    assert.equal((await watch()).status, 'down');
+    await new Promise((res) => setTimeout(res, 20));
+    assert.equal(site.hooks.length, sent + 1);
+    const down = site.hooks.at(-1).body.text;
+    assert.match(down, /^Liftoff alert: invoicely\.app is down\. https:\/\/invoicely\.app\/ answered 503\./);
+    assert.match(down, new RegExp(`/#${slug}$`));
+
+    site.status = 200;
+    later(5 * MIN);
+    await w.runDue();
+    await new Promise((res) => setTimeout(res, 20));
+    assert.match(site.hooks.at(-1).body.text, /^Liftoff: invoicely\.app is back up, after 10 minutes\./);
+    assert.ok((await me.get('/api/me')).body.alerts.channel.lastSentAt);
+
+    // A test on demand, then off.
+    r = await me.post('/api/me/alerts/test');
+    assert.equal(r.status, 200);
+    assert.match(site.hooks.at(-1).body.text, /Liftoff test/);
+    r = await me.del('/api/me/alerts');
+    assert.equal(r.body.channel, null);
+    assert.equal((await me.post('/api/me/alerts/test')).status, 400);
+  } finally {
+    await t.stop();
+  }
+});
+
+test('Discord gets no pings and Slack no links or mentions from what a site says', async () => {
+  const { t, me, site, slug, later, w } = await setup();
+  try {
+    await me.post('/api/me/alerts', { url: DISCORD });
+    assert.deepEqual(site.hooks.at(-1).body.allowed_mentions, { parse: [] });
+    const uid = t.ctx.store.listUsers()[0];
+    const ev = { type: 'opened', incident: { kind: 'check', title: 'Webhook endpoint verifies signatures: stopped passing', detail: '@everyone <!channel> <https://evil.example|click>' } };
+    await t.ctx.alerts.incident(uid, slug, ev);
+    assert.match(site.hooks.at(-1).body.content, /@everyone/);
+    assert.deepEqual(site.hooks.at(-1).body.allowed_mentions, { parse: [] });
+
+    await me.del('/api/me/alerts');
+    await me.post('/api/me/alerts', { url: SLACK });
+    await t.ctx.alerts.incident(uid, slug, ev);
+    const text = site.hooks.at(-1).body.text;
+    assert.ok(!text.includes('<!channel>') && !text.includes('<https://evil'), text);
+    assert.match(text, /&lt;!channel&gt;/);
+    // Quiet events (from pausing) send nothing.
+    const n = site.hooks.length;
+    assert.equal(await t.ctx.alerts.incident(uid, slug, { ...ev, quiet: true }), false);
+    assert.equal(site.hooks.length, n);
+    later(0);
+    await w.runDue();
+  } finally {
+    await t.stop();
+  }
 });

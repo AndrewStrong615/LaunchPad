@@ -15,6 +15,7 @@ import { ProofRunner } from './lib/proof.mjs';
 import { Billing } from './lib/billing.mjs';
 import { Records } from './lib/records.mjs';
 import { Watcher } from './lib/watch.mjs';
+import { Alerts } from './lib/alerts.mjs';
 import { createApp } from './lib/app.mjs';
 import { provision } from './lib/provision.mjs';
 import { modelFor } from './lib/agent.mjs';
@@ -43,6 +44,8 @@ export async function buildContext(config, { anthropic, fetch, safeFetch, proof,
   ctx.proof = new ProofRunner(ctx, proof);
   ctx.billing = new Billing(ctx, fetch || globalThis.fetch);
   ctx.watch = new Watcher(ctx, watch);
+  ctx.alerts = new Alerts(ctx);
+  ctx.watch.on((uid, slug, ev) => ctx.alerts.incident(uid, slug, ev));
   return ctx;
 }
 

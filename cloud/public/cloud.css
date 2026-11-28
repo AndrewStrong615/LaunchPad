@@ -956,3 +956,11 @@ dialog.modal .acts { display: flex; gap: 8px; justify-content: flex-end; margin-
   .watch-bars { gap: 1px; height: 24px; }
   .watch .row .end { margin-left: 0; width: 100%; }
 }
+.watch-alerts { margin: 2px 0 8px; color: var(--muted); }
+.alerts-form { margin-top: 10px; }
+.alerts-form .k { display: block; font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
+.alerts-card .line { margin-top: 10px; flex-wrap: wrap; }
+.watch-alerts .link { background: none; border: 0; padding: 0; font: inherit; color: var(--ink-2); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.watch-alerts .link:hover { color: var(--ink); }
+/* A watched site that's down: the sidebar's live dot turns red too. */
+.nav .end:has(.watch-down) .status-dot.live { background: var(--bad-dot); box-shadow: none; }

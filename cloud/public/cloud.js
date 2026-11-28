@@ -706,6 +706,51 @@
           h('button', { class: 'btn', type: 'button', onclick: () => go('accounts') }, 'Manage', icon('arrow')))));
   }
 
+  // Alerts (lib/alerts.mjs): where Liftoff says a watched app broke. A Slack
+  // or Discord webhook for now; saving one sends a first message to it.
+  function alertsCard(me) {
+    const ch = me.alerts?.channel || null;
+    const save = (e) => {
+      e.preventDefault();
+      const url = e.currentTarget.elements.hook.value.trim();
+      if (!url) return;
+      busy(e.submitter, async () => {
+        const r = await post('/api/me/alerts', { url });
+        C.me.alerts = r;
+        toast(`Connected. Check ${r.channel.label} for Liftoff’s first message.`);
+        repaint();
+      });
+    };
+    const test = (e) => busy(e.currentTarget, async () => {
+      C.me.alerts = await post('/api/me/alerts/test');
+      toast(`Sent a test to ${ch.label}`);
+      repaint();
+    });
+    const remove = (e) => busy(e.currentTarget, async () => {
+      if (!confirm(`Stop sending alerts to ${ch.label}?`)) return;
+      C.me.alerts = await api('/api/me/alerts', { method: 'DELETE' });
+      toast('Alerts turned off');
+      repaint();
+    });
+    return h('section', { class: 'card narrow alerts-card' },
+      h('div', { class: 'card-head' }, h('h2', {}, 'Alerts'), h('span', { class: 'end sub' }, ch ? `To ${ch.label}` : 'Off')),
+      h('div', { class: 'card-body' },
+        h('p', { class: 'small' }, 'When Liftoff is watching an app and something breaks (the site goes down, a check stops passing, a certificate or domain is about to run out), it tells you here, and again when it’s fixed.'),
+        ch ? [
+          h('div', { class: 'line' },
+            h('span', { class: 'tile' }, icon('activity')),
+            h('div', { class: 'grow' }, h('div', { class: 'name' }, `${ch.label} webhook ending in …${ch.hint}`),
+              h('div', { class: 'small' }, ch.lastError ? `The last alert didn’t go through: ${ch.lastError}` : ch.lastSentAt ? `Last message ${ago(ch.lastSentAt)}` : `Added ${ago(ch.addedAt)}`)),
+            h('button', { class: 'btn', type: 'button', onclick: test }, 'Send a test'),
+            h('button', { class: 'btn quiet', type: 'button', onclick: remove }, 'Remove')),
+        ] : h('form', { class: 'alerts-form', onsubmit: save },
+          h('label', { class: 'k', for: 'alert-hook' }, 'Slack or Discord webhook'),
+          h('div', { class: 'row' },
+            h('input', { id: 'alert-hook', name: 'hook', class: 'in grow mono', type: 'url', autocomplete: 'off', spellcheck: 'false', placeholder: 'https://hooks.slack.com/services/…' }),
+            h('button', { class: 'btn primary', type: 'submit' }, 'Connect')),
+          h('p', { class: 'small tip' }, 'In Slack: add the Incoming Webhooks app and pick a channel. In Discord: channel settings, Integrations, New Webhook. Paste the address here; Liftoff sends a first message to check it.'))));
+  }
+
   function sessionsCard() {
     return h('section', { class: 'card narrow' },
       h('div', { class: 'card-head' }, h('h2', {}, 'Signing in')),
@@ -770,9 +815,9 @@
   function settingsView() {
     const head = h('div', { class: 'page-head narrow' }, h('div', {},
       h('h1', {}, 'Account settings'),
-      h('p', {}, 'Your profile, how Liftoff Cloud looks, and how your runs start.')));
+      h('p', {}, 'Your profile, how Liftoff Cloud looks, how your runs start, and where alerts go.')));
     if (!C.me) return [head, h('div', { class: 'card narrow empty' }, h('p', {}, 'Loading your settings…'))];
-    return [head, profileCard(C.me), appearanceCard(), runsCard(C.me), C.me.admin ? recordsCard() : null, connectionsCard(C.me), tourCard(), sessionsCard(), dangerCard()];
+    return [head, profileCard(C.me), appearanceCard(), runsCard(C.me), alertsCard(C.me), C.me.admin ? recordsCard() : null, connectionsCard(C.me), tourCard(), sessionsCard(), dangerCard()];
   }
 
   // ---------- run records (admins only) ----------
@@ -1165,6 +1210,7 @@
         recent.length ? h('details', { class: 'watch-history' },
           h('summary', {}, `Fixed recently (${recent.length})`),
           h('ul', {}, recent.map((i) => h('li', { key: i.id }, h('span', { class: 'grow' }, i.title), h('span', { class: 'small' }, `${shortDay(i.openedAt)}, ${span(i.openedAt, i.closedAt)}`))))) : null,
+        h('p', { class: 'small watch-alerts' }, C.me?.alerts?.channel ? `Alerts go to ${C.me.alerts.channel.label}.` : 'Get alerts in Slack or Discord: ', C.me?.alerts?.channel ? null : h('button', { class: 'link', type: 'button', onclick: () => go('settings') }, 'add a webhook in Account settings')),
         h('div', { class: 'row' },
           h('button', { class: 'btn', onclick: checkNow }, icon('refresh'), 'Check now'),
           h('button', { class: 'btn quiet', onclick: pause(true) }, 'Pause watching'),
@@ -1746,7 +1792,7 @@
     // The overview's app cards: a watched site that's down says so instead of "Live".
     appStatus: (a) => (a.cloud?.watch?.status === 'down' ? h('span', { class: 'pill bad' }, h('span', { class: 'd' }), 'Down') : null),
     appBadge: (a) => {
-      if (a.cloud?.watch?.status === 'down') return h('span', { class: 'pill bad sm', title: 'The live site is down' }, 'Down');
+      if (a.cloud?.watch?.status === 'down') return h('span', { class: 'pill bad sm watch-down', title: 'The live site is down' }, 'Down');
       const r = a.cloud?.run;
       if (!r) return null;
       if (r.status === 'needs-you') return h('span', { class: 'pill warn sm', title: `${ai()} needs you` }, '!');
