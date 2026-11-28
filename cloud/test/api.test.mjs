@@ -133,6 +133,28 @@ test('sign-in, origin checks and the plain API', async (t) => {
   r = await me.get('/api/apps/../../etc');
   assert.equal(r.status, 404);
 
+  // What the app does: the owner corrects it, and steps and checks follow.
+  r = await me.get('/api/apps/invoicely');
+  assert.equal(r.body.features.payments, true, 'the pricing page means it will take payments');
+  assert.equal(r.body.profile.confirmedAt, null);
+  r = await me.post('/api/apps/invoicely/profile', { feature: 'payments', on: false });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(r.body.features.payments, false);
+  assert.ok(!r.body.steps.some((s) => s.id === 'payments'));
+  assert.ok(!r.body.checklist.some((c) => c.id === 'pay-products'));
+  assert.deepEqual(r.body.profile.overridden, [], 'a pricing page is only a hint, so nothing to flag');
+  r = await me.post('/api/apps/invoicely/profile', { feature: 'payments', on: null });
+  assert.equal(r.body.features.payments, true);
+  assert.equal(r.body.checklist.find((c) => c.id === 'pay-products').by, 'you', 'progress came back');
+  r = await me.post('/api/apps/invoicely/profile', { confirm: true });
+  assert.ok(r.body.profile.confirmedAt);
+  r = await me.post('/api/apps/invoicely/profile', { feature: 'payments', on: 'maybe' });
+  assert.equal(r.status, 400);
+  r = await me.post('/api/apps/invoicely/profile', { feature: 'crypto', on: true });
+  assert.equal(r.status, 400);
+  r = await me.post('/api/apps/invoicely/profile', {});
+  assert.equal(r.status, 400);
+
   // Settings are checked so a key can never be sent to another host.
   r = await me.post('/api/apps/invoicely/settings', { key: 'posthog.host', value: 'https://evil.example' });
   assert.equal(r.status, 400);
@@ -550,4 +572,32 @@ test('a message sent while Claude works shows once, even when the session echoes
   assert.equal(r.status, 200, r.text);
   const run = await until(async () => { const x = (await me.get(url)).body; return x.status === 'finished' && x; });
   assert.equal(run.events.filter((e) => e.kind === 'you' && e.text === 'Use Vercel').length, 1);
+});
+
+test('Pilot corrects what the app does with liftoff_profile, and the plan shows it', async (t) => {
+  const { runTool } = await import('../lib/tools.mjs');
+  const srv = await startTest({});
+  t.after(() => srv.stop());
+  const me = await signIn(srv.base);
+  const zip = zipDirectory(path.join(FIXTURES, 'next-saas'));
+  const slug = (await me.call('POST', '/api/import/zip?name=invoicely.zip', zip, { 'content-type': 'application/zip' })).body.slug;
+  const run = { uid: JSON.parse(fs.readFileSync(path.join(srv.dataDir, 'dev-user.json'), 'utf8')).uid, slug };
+
+  let plan = JSON.parse((await runTool(srv.ctx, run, 'liftoff_plan', {})).text);
+  assert.ok(plan.profile.does.some((f) => f.id === 'payments' && f.from === 'a guess from the code'));
+  assert.equal(plan.profile.confirmedByUser, false);
+
+  const out = await runTool(srv.ctx, run, 'liftoff_profile', { feature: 'payments', on: false });
+  assert.equal(out.isError, false, out.text);
+  assert.doesNotMatch(out.text, /"payments \(/);
+  plan = JSON.parse((await runTool(srv.ctx, run, 'liftoff_plan', {})).text);
+  assert.ok(plan.profile.doesNot.some((f) => f.id === 'payments' && f.from === 'the user'));
+  assert.ok(!plan.steps.some((s) => s.id === 'payments'));
+
+  // A step that doesn't apply any more is refused, with how to fix it.
+  const step = await runTool(srv.ctx, run, 'liftoff_step', { step: 'paywall', status: 'running' });
+  assert.equal(step.isError, true);
+  assert.match(step.text, /doesn't apply/);
+  assert.equal((await runTool(srv.ctx, run, 'liftoff_profile', { feature: 'crypto', on: true })).isError, true);
+  assert.equal((await runTool(srv.ctx, run, 'liftoff_profile', { feature: 'ai', on: 'yes' })).isError, true);
 });

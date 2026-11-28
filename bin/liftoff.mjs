@@ -7,10 +7,11 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { ACCOUNTS, STEPS, accountsFor, accountsForStep, needsFor, stepsFor } from '../lib/catalog.mjs';
 import {
-  CONFIG_KEYS, addDeploy, addTask, connectAccount, credentialEnv, disconnectAccount, findProject, initProject,
-  listAccounts, listProjects, loadState, migrateToKeychain, recordChange, removeTask, resetStep, saveState,
-  secretStore, setCheck, setConfig, setStep, setTaskDone, summarize, undoPlan, waitingOn,
+  CONFIG_KEYS, addDeploy, addTask, confirmProfile, connectAccount, credentialEnv, disconnectAccount, findProject, initProject,
+  leftOutFor, listAccounts, listProjects, loadState, migrateToKeychain, recordChange, removeTask, resetStep, saveState,
+  secretStore, setCheck, setConfig, setFeature, setStep, setTaskDone, summarize, undoPlan, waitingOn,
 } from '../lib/state.mjs';
+import { FEATURE_IDS, featuresOf, profileView } from '../lib/profile.mjs';
 import { startServer } from '../lib/server.mjs';
 import { applyVerify, purchaseProvenByStripe, runVerify } from '../lib/verify.mjs';
 import { applyScan, storeScan, walk } from '../lib/scan.mjs';
@@ -24,6 +25,8 @@ const HELP = `liftoff: launch your app and follow it on the Flight Board
 
   liftoff init [dir]                       read the app, create .liftoff/state.json, register it
   liftoff plan [--explain]                 steps in order, what each waits on, the accounts each needs
+  liftoff profile [<feature> <on|off|auto>] [--confirm]
+                                           what the app does (payments, sign-in, …); steps and checks follow it
   liftoff next [--json]                    the single most useful thing to do now
   liftoff status [app] [--json]            progress for this app (or all apps with --all)
   liftoff step <id> <todo|running|done|skipped|blocked> [--provider P] [--note N] [--force]
@@ -160,15 +163,35 @@ async function main() {
       out(`State saved to ${s.root}/.liftoff/state.json`);
       return;
     }
+    case 'profile': {
+      const s = loadState(dirOf(flags));
+      const [id, value] = args;
+      if (id) {
+        const on = { on: true, yes: true, off: false, no: false, auto: null }[String(value).toLowerCase()];
+        if (on === undefined) throw new Error(`Say on, off or auto: liftoff profile ${id} on. Features: ${FEATURE_IDS.join(', ')}`);
+        setFeature(s, id, on);
+      }
+      if (flags.confirm) confirmProfile(s);
+      if (id || flags.confirm) saveState(s);
+      const p = profileView(s);
+      const sum = summarize(s);
+      if (flags.json) return out(JSON.stringify({ ...p, steps: sum.stepsTotal, checks: sum.checksTotal }, null, 2));
+      out(`${s.name}: ${p.sizeLabel.toLowerCase()} (${sum.stepsTotal} launch steps, ${sum.checksTotal} checks)`);
+      const from = { you: 'set by you', code: 'found in the code', hint: 'likely', launch: 'the launch is doing it', unsure: 'not built yet, kept in case the app needs it', scan: 'not seen' };
+      for (const f of p.features) out(`  ${f.on ? '✓' : '·'} ${f.id.padEnd(10)} ${f.label.padEnd(24)} ${from[f.source]}${f.why ? `: ${f.why}` : ''}`);
+      out(p.confirmedAt ? `Confirmed ${p.confirmedAt.slice(0, 10)}.` : 'Not confirmed yet: fix anything wrong with `liftoff profile <feature> on|off`, then `liftoff profile --confirm`.');
+      return;
+    }
     case 'plan': {
       const s = loadState(dirOf(flags));
       const accounts = listAccounts();
-      const plan = stepsFor(s.platforms).map((step) => ({
+      const features = featuresOf(s);
+      const plan = stepsFor(s.platforms, features).map((step) => ({
         id: step.id,
         label: step.label,
         skill: step.skill,
         status: s.steps[step.id]?.status,
-        needs: needsFor(step, s.platforms),
+        needs: needsFor(step, s.platforms, features),
         waitingOn: waitingOn(s, step.id),
         does: step.does,
         accounts: accountsForStep(step, s.platforms).map((id) => {
@@ -176,13 +199,18 @@ async function main() {
           return { id, label: a.label, connected: a.connected };
         }),
       }));
-      if (flags.json) return out(JSON.stringify({ app: s.name, platforms: s.platforms, plan, accountsNeeded: accountsFor(s.platforms) }, null, 2));
-      out(`Plan for ${s.name} (${s.platforms.join(', ')}):`);
+      if (flags.json) return out(JSON.stringify({ app: s.name, platforms: s.platforms, features, plan, accountsNeeded: accountsFor(s.platforms, features) }, null, 2));
+      out(`Plan for ${s.name} (${s.platforms.join(', ')}; ${profileView(s).sizeLabel.toLowerCase()}, see liftoff profile):`);
       for (const p of plan) {
         const acc = p.accounts.map((a) => `${a.label} ${a.connected ? '✓' : '✗'}`).join(', ');
         const wait = p.status !== 'done' && p.waitingOn.length ? `  waits on ${p.waitingOn.join(', ')}` : '';
         out(`  ${icon[p.status]} ${p.label.padEnd(20)} skill: ${p.skill.padEnd(18)} ${acc}${wait}`);
         if (flags.explain) out(`      ${p.does}`);
+      }
+      const left = leftOutFor(s, features).steps;
+      if (left.length) {
+        out('\n  Not part of this launch:');
+        for (const x of left) out(`  · ${x.label.padEnd(22)} only if it ${x.for}: liftoff profile ${x.features[0]} on`);
       }
       if (flags.explain) out('\nNothing that spends money, changes DNS, goes live or submits to a store happens without your yes.');
       return;

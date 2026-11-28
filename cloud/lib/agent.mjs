@@ -31,7 +31,7 @@ export const tierOf = (model) => MODELS.find((m) => m.id === model)?.tier || nul
 export const modelFor = (value) => MODELS.find((m) => m.tier === value || m.id === value)?.id || null;
 export const tierLabel = (tier) => MODELS.find((m) => m.tier === tier)?.label || tier;
 export const EFFORT = 'high';
-export const PROMPT_VERSION = '3';
+export const PROMPT_VERSION = '4';
 
 const obj = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
@@ -55,6 +55,10 @@ export const CUSTOM_TOOLS = [
     url: str('Link where the user does it'),
   }, ['title'])),
   tool('liftoff_checklist', 'The release-readiness checklist: every item with its id, whether it is done and by whom, and the latest verify result.', obj({})),
+  tool('liftoff_profile', "Change what the app does (liftoff_plan's profile), only after the user said so or agreed with ask_user. Steps, the user's paperwork tasks and the checklist follow at once: turning payments off removes the payment steps and checks.", obj({
+    feature: str('What the app does', { enum: ['payments', 'accounts', 'database', 'email', 'ai', 'uploads', 'community'] }),
+    on: { type: 'boolean', description: 'True if the app does it, false if it does not' },
+  }, ['feature', 'on'])),
   tool('liftoff_check', 'Tick (or untick) a readiness item you satisfied. Items liftoff_verify or the pre-scan can check are refused: prove those with liftoff_verify instead.', obj({ item: str('Checklist item id'), done: { type: 'boolean', description: 'Default true' } }, ['item'])),
   tool('liftoff_record', 'Log what a step changed so it can be undone later: a file path in the repo, or a provider resource like "stripe:product:prod_123", "vercel:project:greenrow", "github:secret:STRIPE_SECRET_KEY".', obj({
     step: str('Step id'),
@@ -131,6 +135,7 @@ The sandbox reaches package registries, GitHub and the connected services' APIs,
 
 ## Order and safety
 - Run the steps you were given in the order liftoff_plan lists them. liftoff_step refuses a step whose needs aren't finished: finish or skip those first.
+- liftoff_plan's profile says what the app does (takes payments, signs people in, …), and the steps and checks only cover that. Don't add what it says the app doesn't do. Parts marked "not built yet" are kept in case the app needs them: if the app clearly won't (a portfolio site with no checkout), ask with ask_user before turning them off. If the code or the user shows the profile is wrong (say the user wants payments after all), ask with ask_user, then change it with liftoff_profile.
 - For each step: liftoff_step running → read and follow the skill → log files and provider resources with liftoff_record → prove it with liftoff_verify where the skill names checks → liftoff_step done with the provider and a one-line note. Use skipped (with a note) when the app already had it before Liftoff. Tick other readiness items you satisfied with liftoff_check; never tick a verifiable item by hand.
 - A step whose account isn't connected: liftoff_step blocked with the note "needs <account>", add a release-blocking task "Connect <account> in Liftoff (Accounts page)", and carry on with the other steps.
 - Ask with ask_user, and wait for a yes, before anything that spends money, buys a domain or changes DNS, switches payments to live mode, submits to an app store, deletes a provider resource or emails real people. Keep payments in test mode.

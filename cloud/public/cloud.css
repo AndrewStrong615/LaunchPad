@@ -861,6 +861,9 @@ dialog.modal .acts { display: flex; gap: 8px; justify-content: flex-end; margin-
 .ob-found li b { font-weight: 600; }
 .ob-found li.more { padding-left: 26px; }
 .ob-result .empty-row { padding: 16px 18px; }
+.ob-does { padding: 14px 18px 18px; border-top: 1px solid var(--line-2); }
+.ob-does-head { display: flex; align-items: center; gap: 8px; }
+.ob-does .small { margin: 4px 0 12px; }
 
 /* services */
 .ob-panel .card-body.rows { padding-top: 0; padding-bottom: 4px; }
