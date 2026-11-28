@@ -530,7 +530,8 @@ function renderApp(app) {
               h('div', { style: { textAlign: 'right' } },
                 h('span', { class: 'pill sm ' + (d.status === 'live' ? 'good' : d.status === 'failed' ? 'bad' : 'run') }, h('span', { class: 'd' }), d.status === 'live' ? 'Live' : d.status),
                 d.version ? h('div', { class: 'v', style: { marginTop: '3px' } }, d.version) : null))))
-              : h('div', { class: 'empty-row' }, 'Nothing deployed yet.'))),
+              : app.liveUrl ? null : h('div', { class: 'empty-row' }, 'Nothing deployed yet.'),
+            hook('deploysFoot', app))),
         h('section', { class: 'card' },
           h('div', { class: 'card-head' }, h('h2', {}, 'Accounts this app uses'),
             h('span', { class: 'end' }, h('button', { class: 'btn quiet', onclick: () => go('accounts') }, 'All accounts', icon('arrow')))),
@@ -594,10 +595,27 @@ async function mutate(path, method, body) {
   } catch (err) { toast(err.message); }
 }
 
+// The view lives in the address (#<app>, #accounts, #!<view>), and each move
+// to a new view is a history entry, so the browser's Back and Forward (and a
+// phone's back gesture) move between views instead of leaving the page.
+function hashFor(view, slug) {
+  return view === 'app' ? `#${encodeURIComponent(slug)}` : view === 'accounts' ? '#accounts' : HOOKS.views?.[view] ? `#!${view}` : '#';
+}
+
+function readHash() {
+  const hash = decodeURIComponent(location.hash.slice(1));
+  state.selected = null;
+  if (hash === 'accounts') state.view = 'accounts';
+  else if (hash.startsWith('!') && HOOKS.views?.[hash.slice(1)]) state.view = hash.slice(1);
+  else if (hash && !hash.startsWith('!')) { state.view = 'app'; state.selected = hash; }
+  else state.view = 'overview';
+}
+
 function go(view, slug = null) {
   state.view = view;
   state.selected = slug;
-  history.replaceState(null, '', view === 'app' ? `#${slug}` : view === 'accounts' ? '#accounts' : HOOKS.views?.[view] ? `#!${view}` : '#');
+  const hash = hashFor(view, slug);
+  if (hash !== (location.hash || '#')) history.pushState(null, '', hash);
   render();
   window.scrollTo(0, 0);
 }
@@ -649,10 +667,13 @@ function start() {
   addEventListener('resize', placeNavPill, { passive: true });
   // theme.js says when the theme changes (your pick, or the device switching).
   addEventListener('liftoff-theme', () => repaint());
-  const hash = decodeURIComponent(location.hash.slice(1));
-  if (hash === 'accounts') state.view = 'accounts';
-  else if (hash.startsWith('!') && HOOKS.views?.[hash.slice(1)]) state.view = hash.slice(1);
-  else if (hash) { state.view = 'app'; state.selected = hash; }
+  readHash();
+  addEventListener('popstate', (e) => {
+    readHash();
+    hook('popstate', e.state);
+    render();
+    window.scrollTo(0, 0);
+  });
   render();
   refresh(true);
   const tick = async () => {

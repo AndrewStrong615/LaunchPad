@@ -71,8 +71,14 @@ test('the paid parts need a Launch Pass, and Checkout grants it', async () => {
     assert.equal(p.enabled, true);
     assert.equal(p.unlocked, false);
     assert.equal(p.testMode, true);
-    assert.deepEqual(p.price, { usd: 149, tokens: 5000 }, 'the pass is charged in dollars and shown with its tokens');
-    assert.equal(p.includes[0], 'Pilot runs the launch steps in the cloud');
+    assert.deepEqual(p.price, { usd: 149, tokens: 5000, runTokens: 1500 }, 'the pass is charged in dollars and shown with its tokens, and what one run may use');
+    // This app doesn't take payments yet, so the purchase test isn't sold to it.
+    assert.deepEqual(p.includes, ['Pilot runs the launch steps in the cloud', 'Launch reports and the “Launch certified” badge']);
+    assert.match(p.later, /purchase test is for apps that take payments through Stripe/);
+    t.ctx.store.updateApp(uid, slug, (s) => { s.payments = ['stripe']; });
+    p = await pass();
+    assert.deepEqual(p.includes, ['Pilot runs the launch steps in the cloud', 'Liftoff’s own purchase test, with screenshots', 'Launch reports and the “Launch certified” badge']);
+    assert.equal(p.later, null, 'a web app on Stripe gets the whole pass');
     assert.equal(p.pass, null);
 
     // Free: the scan, verify and the score. Paid: runs, the purchase test, reports.
@@ -88,7 +94,7 @@ test('the paid parts need a Launch Pass, and Checkout grants it', async () => {
     assert.equal(r.status, 200, r.text);
     assert.match(r.body.url, /^https:\/\/checkout\.stripe\.com\//);
     const form = stripe.created[0];
-    assert.match(form['line_items[0][price_data][product_data][description]'], /cloud runs with Pilot and 5,000 tokens/);
+    assert.match(form['line_items[0][price_data][product_data][description]'], /cloud runs with Pilot and 5,000 tokens, the purchase test, and the launch report and badge\.$/);
     assert.equal(form.mode, 'payment');
     assert.equal(form['line_items[0][price_data][unit_amount]'], '14900');
     assert.equal(form['line_items[0][price_data][currency]'], 'usd');
@@ -224,6 +230,23 @@ test('free accounts skip the pass', async () => {
     assert.equal(p.unlocked, true);
     assert.equal((await me.post(`/api/apps/${slug}/report`)).status, 200);
     assert.equal((await me.post(`/api/apps/${slug}/pass`)).status, 409);
+  } finally {
+    await t.stop();
+  }
+});
+
+test("a mobile app's pass lists only what it can use", async () => {
+  const { t, me, stripe } = await setup();
+  try {
+    const zip = zipDirectory(path.join(FIXTURES, 'expo-recipes'));
+    const slug = (await me.call('POST', '/api/import/zip?name=recipes.zip', zip, { 'content-type': 'application/zip' })).body.slug;
+    const p = (await me.get(`/api/apps/${slug}`)).body.cloud.pass;
+    assert.deepEqual(p.includes, ['Pilot runs the launch steps in the cloud', 'A launch report to share, with every check and a score']);
+    assert.match(p.later, /purchase test and the “Launch certified” badge come later/);
+    assert.equal((await me.post(`/api/apps/${slug}/pass`)).status, 200);
+    const said = stripe.created.at(-1)['line_items[0][price_data][product_data][description]'];
+    assert.match(said, /cloud runs with Pilot and 5,000 tokens, and a launch report\.$/);
+    assert.doesNotMatch(said, /purchase test|badge/);
   } finally {
     await t.stop();
   }

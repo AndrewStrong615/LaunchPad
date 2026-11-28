@@ -906,3 +906,15 @@ dialog.modal .acts { display: flex; gap: 8px; justify-content: flex-end; margin-
   .scan-lines li:not(:last-child) .st::before { opacity: 0; }
   .scan-lines li:last-child .st::after { display: none; }
 }
+
+/* Deployments: the live address of an app that's already live. */
+.live-form { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-2); display: grid; gap: 4px; }
+.live-form .k { font-size: 13px; font-weight: 600; color: var(--ink); }
+.live-form .small { color: var(--muted); }
+.live-form .row { padding-top: 4px; }
+.live-form .in { min-width: 0; font-family: var(--mono); font-size: 12px; }
+
+/* Launch Pass: the price on the tour, and what this app doesn't get yet. */
+.ob-plan .plan-price { margin-left: auto; font-size: 13px; color: var(--muted); }
+.ob-plan .plan-price b { font-size: 18px; font-weight: 660; color: var(--ink); letter-spacing: -.02em; }
+.pass-later { margin: 0 0 10px; color: var(--muted); }

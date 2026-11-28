@@ -77,6 +77,34 @@ export function validateSetting(key, value) {
   }
 }
 
+// The address of an app that's already live, typed in by its owner so the
+// free Verify can check it without a run (Pilot's deploys set it too, through
+// liftoff_deploy). "myapp.com" means https://myapp.com. Verify fetches it
+// through safeFetch, so it can't reach this server's own network.
+export function validateLiveUrl(value) {
+  const v = String(value ?? '').trim();
+  if (!v) return null;
+  const bad = () => {
+    throw new HttpError(400, 'Use your site’s address, like https://myapp.com');
+  };
+  if (v.length > 500) bad();
+  let u;
+  try {
+    u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `https://${v}`);
+  } catch {
+    bad();
+  }
+  if (!['https:', 'http:'].includes(u.protocol) || u.username || u.password || !u.hostname.includes('.')) bad();
+  return u.origin;
+}
+
+export function setLiveUrl(state, url) {
+  if ((state.liveUrl || null) === url) return state;
+  state.liveUrl = url;
+  state.log.push({ at: new Date().toISOString(), msg: url ? `Live address set to ${url}` : 'Live address removed' });
+  return state;
+}
+
 const clip = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
 // The plan Claude works from: liftoff_plan's answer.

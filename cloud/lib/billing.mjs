@@ -19,17 +19,29 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { HttpError } from './http.mjs';
 import { toTokens, tokenWord } from './brand.mjs';
+import { stripeConnected } from './accounts.mjs';
+import { sellsWithStripe } from '../../lib/verify.mjs';
 
 const SESSION = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const KIND = 'launch_pass';
 const OPEN_RUN = new Set(['starting', 'running', 'needs-you', 'budget']);
 const MAX_SKEW_S = 300;
 
-export const passIncludes = (name) => [
+// What the pass adds for one app. The purchase test runs on web apps that
+// take payments through Stripe, and only web apps can be certified so far,
+// so an app the pass can't fully serve yet isn't sold those parts.
+export const passIncludes = (name, { web = true, purchaseTest = true } = {}) => [
   `${name} runs the launch steps in the cloud`,
-  'Liftoff’s own purchase test, with screenshots',
-  'Launch reports and the “Launch certified” badge',
-];
+  purchaseTest ? 'Liftoff’s own purchase test, with screenshots' : null,
+  web ? 'Launch reports and the “Launch certified” badge' : 'A launch report to share, with every check and a score',
+].filter(Boolean);
+
+// What the pass doesn't do for this app yet, said before anyone pays.
+export function passLater({ web = true, purchaseTest = true } = {}) {
+  if (!web) return 'For App Store and Google Play apps, Liftoff’s purchase test and the “Launch certified” badge come later. Web apps get them now.';
+  if (!purchaseTest) return 'Liftoff’s purchase test is for apps that take payments through Stripe. It opens for this app once it does.';
+  return null;
+}
 
 const money = (n) => Math.round(n * 100) / 100;
 
@@ -183,17 +195,28 @@ export class Billing {
     this.save(uid, b);
   }
 
+  // Which parts of the pass this app can use now.
+  fit(uid, state) {
+    return {
+      web: (state.platforms || []).includes('web'),
+      purchaseTest: sellsWithStripe(state, { stripeConnected: stripeConnected(this.ctx.store, uid) }),
+    };
+  }
+
   // What the Flight Board shows.
   view(uid, state) {
     if (!this.enabled) return { enabled: false, unlocked: true };
     const free = this.free(uid);
     const p = this.pass(uid, state.slug);
+    const fit = this.fit(uid, state);
     return {
       enabled: true,
       unlocked: free || !!p,
       free,
-      price: { usd: this.cfg.passUsd, tokens: toTokens(this.cfg.claudeUsd, this.rate) },
-      includes: passIncludes(this.ctx.config.assistant),
+      // runTokens: what one run may use before it checks with the person.
+      price: { usd: this.cfg.passUsd, tokens: toTokens(this.cfg.claudeUsd, this.rate), runTokens: toTokens(this.ctx.config.runBudgetUsd, this.rate) },
+      includes: passIncludes(this.ctx.config.assistant, fit),
+      later: passLater(fit),
       testMode: /^(sk|rk)_test_/.test(this.cfg.secretKey),
       pass: p ? { at: p.at, tokens: this.tokensOf(this.claudeTime(uid, state.slug)) } : null,
     };
@@ -216,6 +239,15 @@ export class Billing {
     return body;
   }
 
+  // The line on Stripe's Checkout page and receipt: what this app gets.
+  description(uid, state) {
+    const { web, purchaseTest } = this.fit(uid, state);
+    const parts = [`cloud runs with ${this.ctx.config.assistant} and ${tokenWord(toTokens(this.cfg.claudeUsd, this.rate))}`];
+    if (purchaseTest) parts.push('the purchase test');
+    parts.push(web ? 'the launch report and badge' : 'a launch report');
+    return `For ${String(state.name).slice(0, 80)}: ${parts.slice(0, -1).join(', ')}, and ${parts.at(-1)}.`;
+  }
+
   // A Checkout page for this app's pass. Returns where to send the browser.
   async checkout(uid, slug) {
     if (!this.enabled) throw new HttpError(404, 'Payments are off on this server.');
@@ -230,7 +262,7 @@ export class Billing {
       'line_items[0][price_data][currency]': 'usd',
       'line_items[0][price_data][unit_amount]': String(Math.round(this.cfg.passUsd * 100)),
       'line_items[0][price_data][product_data][name]': 'Liftoff Launch Pass',
-      'line_items[0][price_data][product_data][description]': `For ${String(state.name).slice(0, 80)}: cloud runs with ${this.ctx.config.assistant} and ${tokenWord(toTokens(this.cfg.claudeUsd, this.rate))}, the purchase test, and the launch report and badge.`,
+      'line_items[0][price_data][product_data][description]': this.description(uid, state),
       allow_promotion_codes: 'true',
       client_reference_id: uid,
       'metadata[kind]': KIND,
