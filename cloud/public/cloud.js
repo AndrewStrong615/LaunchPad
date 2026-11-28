@@ -38,6 +38,7 @@
     settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
     logout: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="m10 17 5-5-5-5M15 12H4"/>',
     devices: '<rect x="2" y="5" width="14" height="10" rx="1.5"/><path d="M6 19h6M9 15v4"/><rect x="17" y="9" width="5" height="10" rx="1.2"/>',
+    lock: '<rect x="5" y="11" width="14" height="9.5" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   });
 
   const LIVE = new Set(['starting', 'running', 'needs-you']);
@@ -152,12 +153,30 @@
 
   // ---------- adding an app ----------
 
-  function addForms() {
-    const signedIn = !!C.me?.github.token;
-    if (signedIn && !C.repos && !C.reposLoading) {
-      C.reposLoading = true;
-      api('/api/github/repos').then((r) => { C.repos = r || []; repaint(); }).catch(() => {}).finally(() => { C.reposLoading = false; });
+  // Both resolve to the imported app ({ slug, name, … }) once its scan is done.
+  const importRepo = (url, ref) => post('/api/import/github', { url, ref: ref || undefined });
+  async function importZip(f) {
+    const res = await fetch(`/api/import/zip?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'content-type': 'application/zip' }, body: f });
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 401) {
+      location.href = '/login';
+      return null;
     }
+    if (!res.ok) throw new Error(body.error || res.statusText);
+    return body;
+  }
+
+  // Your GitHub repositories, fetched once per page load.
+  const canListRepos = () => !!C.me?.github.token;
+  function loadRepos() {
+    if (!canListRepos() || C.repos || C.reposLoading || C.reposFailed) return;
+    C.reposLoading = true;
+    api('/api/github/repos').then((r) => { C.repos = r || []; repaint(); }).catch(() => { C.reposFailed = true; repaint(); }).finally(() => { C.reposLoading = false; });
+  }
+
+  function addForms() {
+    const signedIn = canListRepos();
+    loadRepos();
     const repoPick = signedIn && C.repos
       ? (C.repos.length
         ? h('label', { class: 'field' }, h('span', {}, 'Your repositories'),
@@ -172,7 +191,7 @@
       const f = e.currentTarget.elements;
       busy(e.submitter, async () => {
         toast('Downloading and scanning the code…');
-        const app = await post('/api/import/github', { url: f.url.value, ref: f.ref.value.trim() || undefined });
+        const app = await importRepo(f.url.value, f.ref.value.trim());
         await refresh(true);
         toast(`Imported ${app.name}`);
         go('app', app.slug);
@@ -191,10 +210,8 @@
       repaint();
       busy(null, async () => {
         toast('Uploading and scanning…');
-        const res = await fetch(`/api/import/zip?name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'content-type': 'application/zip' }, body: f });
-        const body = await res.json().catch(() => ({}));
-        if (res.status === 401) return (location.href = '/login');
-        if (!res.ok) throw new Error(body.error || res.statusText);
+        const body = await importZip(f);
+        if (!body) return;
         C.zipName = '';
         await refresh(true);
         toast(`Imported ${body.name}`);
@@ -229,6 +246,300 @@
         h('p', {}, 'Liftoff reads the code, works out the stack and platforms, and runs the App Store pre-scan and a leaked-key scan. Nothing runs until you start a run.'))),
       addForms(),
     ];
+  }
+
+  // ---------- first run: the welcome tour ----------
+  // Four short steps for a new account: what Liftoff does, add an app (and see
+  // what the free scan found), connect the services it uses, and what's free
+  // versus the Launch Pass. It opens by itself once, for an account with no
+  // apps; finishing or skipping it is saved to the account (prefs.onboarded),
+  // and Account settings can start it again. It covers the whole window, so
+  // the sidebar and top bar step aside while it's open (body.ob-on).
+
+  const OB_STEPS = ['Welcome', 'Add your app', 'Connect services', 'Free and Launch Pass'];
+  const obFresh = () => ({ step: 0, slug: null, src: 'github', q: '', importing: null });
+  C.ob = obFresh();
+  try {
+    const saved = JSON.parse(sessionStorage.getItem('lc-welcome') || 'null');
+    if (saved) Object.assign(C.ob, { step: Math.min(Math.max(saved.step | 0, 0), OB_STEPS.length - 1), slug: saved.slug || null });
+  } catch {}
+  const obSave = () => {
+    try { sessionStorage.setItem('lc-welcome', JSON.stringify({ step: C.ob.step, slug: C.ob.slug })); } catch {}
+  };
+  function obGo(step) {
+    C.ob.step = step;
+    obSave();
+    render();
+    window.scrollTo(0, 0);
+  }
+  function obStart() {
+    C.ob = obFresh();
+    obSave();
+    go('welcome');
+  }
+  // Finished or skipped: don't open it by itself again.
+  function obDone(slug) {
+    try { sessionStorage.removeItem('lc-welcome'); } catch {}
+    C.ob = obFresh();
+    if (C.me && !C.me.prefs?.onboarded) {
+      C.me.prefs = { ...C.me.prefs, onboarded: true };
+      savePrefs({ onboarded: true });
+    }
+    if (slug && appOf(slug)) go('app', slug);
+    else go('overview');
+  }
+
+  const firstName = () => {
+    const u = C.me?.user;
+    if (!u || u.via === 'local') return null;
+    return (u.name || u.login || '').trim().split(/\s+/)[0] || null;
+  };
+  const pctOf = (a) => {
+    const total = a.stepsTotal + a.checksTotal;
+    return total ? Math.round(((a.stepsDone + a.checksDone) / total) * 100) : 0;
+  };
+  const initials = (label) => label.split(/\s|\(/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+
+  function obTop() {
+    const at = C.ob.step;
+    return h('header', { class: 'ob-top' },
+      h('div', { class: 'brand' }, h('span', { class: 'mark' }, icon('rocket')), h('span', {}, 'Liftoff Cloud')),
+      h('ol', { class: 'ob-steps', 'aria-label': `Setup, step ${at + 1} of ${OB_STEPS.length}` }, OB_STEPS.map((label, i) => h('li', {
+        key: label, class: i < at ? 'done' : i === at ? 'on' : '', 'aria-current': i === at ? 'step' : false,
+      }, h('span', { class: 'n' }, i < at ? icon('check') : String(i + 1)), h('span', { class: 't' }, label)))),
+      h('div', { class: 'ob-end' },
+        Board.themeButton(),
+        h('button', { class: 'btn quiet', type: 'button', title: 'Close the tour. You can start it again from Account settings.', onclick: () => obDone(C.ob.slug) }, 'Finish later')));
+  }
+
+  const obHead = (title, text) => h('div', { class: 'ob-head' }, h('h1', {}, title), text ? h('p', {}, text) : null);
+  const obActs = (...kids) => h('div', { class: 'ob-acts' }, kids);
+  const obNext = (label, onclick) => h('button', { class: 'btn primary big', type: 'button', onclick }, label, icon('arrow'));
+  const obBack = (step) => h('button', { class: 'btn quiet big', type: 'button', onclick: () => obGo(step) }, 'Back');
+
+  // 1. What Liftoff does.
+  function obHello() {
+    const name = firstName();
+    const how = (ic, kicker, title, text, tag) => h('li', { class: 'card spot ob-how-card', key: kicker },
+      h('div', { class: 'ob-how-top' }, h('span', { class: 'head-tile' }, icon(ic)), h('span', { class: 'kicker' }, kicker), tag ? h('span', { class: 'pill sm' }, tag) : null),
+      h('h3', {}, title),
+      h('p', {}, text));
+    return [
+      h('div', { class: 'ob-hero' },
+        h('span', { class: 'ob-mark', 'aria-hidden': 'true' }, h('span', { class: 'mark' }, icon('rocket'))),
+        h('h1', {}, name ? `Welcome, ${name}` : 'Welcome to Liftoff Cloud'),
+        h('p', {}, 'Liftoff takes the app you built to one real people can sign up for and pay for. Here’s how it works. Setting up takes about two minutes.')),
+      h('ol', { class: 'ob-how' },
+        how('search', 'Scan', 'See what’s left', 'Liftoff reads your code and lists what stands between it and launch: payments, hosting, sign-in, store rules and leaked keys.', 'Free'),
+        how('rocket', 'Set up', 'Get it done with you', `${ai()}, Liftoff’s launch assistant, does the steps in a private cloud sandbox, asks before anything that costs money or goes live, and hands back a pull request.`),
+        how('shield', 'Prove', 'Know it works', 'Real checks against your live services, a test purchase in Liftoff’s own browser, and a launch report you can share.')),
+      obActs(
+        obNext(state.apps.length ? 'Pick an app' : 'Add your first app', () => obGo(1)),
+        h('button', { class: 'btn quiet big', type: 'button', onclick: () => obDone() }, 'Look around first')),
+    ];
+  }
+
+  // 2. Add an app, then see what the free scan found.
+  function obImport(name, run) {
+    if (C.busy) return;
+    C.ob.importing = name || 'your app';
+    render();
+    busy(null, async () => {
+      try {
+        const app = await run();
+        if (!app) return;
+        await refresh(true);
+        C.ob.slug = app.slug;
+        obSave();
+      } finally {
+        C.ob.importing = null;
+        render();
+      }
+    });
+  }
+
+  function obLinkForm(title) {
+    return h('form', { class: 'ob-link', onsubmit: (e) => {
+      e.preventDefault();
+      const f = e.currentTarget.elements;
+      const url = f.url.value.trim();
+      const name = url.replace(/\.git$/, '').replace(/\/+$/, '').split('/').pop();
+      obImport(name, () => importRepo(url, f.ref.value.trim()));
+    } },
+    title ? h('div', { class: 'ob-or small' }, title) : null,
+    h('div', { class: 'ob-link-row' },
+      h('input', { class: 'in', name: 'url', type: 'url', placeholder: 'https://github.com/you/your-app', 'aria-label': 'GitHub repository link', required: true }),
+      h('input', { class: 'in ref', name: 'ref', type: 'text', placeholder: 'Branch (optional)', 'aria-label': 'Branch (optional)' }),
+      h('button', { class: 'btn primary', type: 'submit' }, 'Import')));
+  }
+
+  function obRepos() {
+    loadRepos();
+    const ob = C.ob;
+    if (!canListRepos() || C.reposFailed) {
+      return h('section', { class: 'card ob-panel', key: 'link' }, h('div', { class: 'card-pad' },
+        obLinkForm(),
+        h('p', { class: 'small' }, C.reposFailed ? 'Couldn’t list your repositories just now. Paste a link instead.' : 'Public repositories import as they are. For a private one, sign in with GitHub or add a GitHub token under Accounts first.')));
+    }
+    if (!C.repos) {
+      return h('section', { class: 'card ob-panel', key: 'loading', 'aria-busy': 'true' },
+        h('div', { class: 'repo-list' }, [0, 1, 2, 3].map((i) => h('div', { class: 'repo-row sk', key: `sk${i}` }, h('span', { class: 'sk-tile' }), h('span', { class: 'sk-line' }), h('span', { class: 'sk-btn' })))));
+    }
+    const q = ob.q.trim().toLowerCase();
+    const hits = C.repos.filter((r) => !q || r.fullName.toLowerCase().includes(q) || (r.description || '').toLowerCase().includes(q));
+    const shown = hits.slice(0, 6);
+    return h('section', { class: 'card ob-panel', key: 'repos' },
+      h('label', { class: 'repo-search' }, icon('search'),
+        h('input', { type: 'search', value: ob.q, placeholder: `Search ${Board.plural(C.repos.length, 'repository', 'repositories')}`, 'aria-label': 'Search your repositories', oninput: (e) => { ob.q = e.currentTarget.value; repaint(); } })),
+      h('div', { class: 'repo-list rows' }, shown.length
+        ? shown.map((r) => h('div', { class: 'repo-row', key: r.fullName },
+          h('span', { class: 'tile' }, icon(r.private ? 'lock' : 'github')),
+          h('div', { class: 'grow' },
+            h('div', { class: 'name' }, h('span', { class: 'own' }, `${r.owner}/`), h('b', {}, r.repo), r.private ? h('span', { class: 'pill sm' }, 'Private') : null),
+            h('div', { class: 'small' }, [r.pushedAt ? `Updated ${ago(r.pushedAt)}` : null, r.description].filter(Boolean).join(' · '))),
+          h('button', { class: 'btn', type: 'button', onclick: () => obImport(r.repo, () => importRepo(r.url)) }, 'Import')))
+        : h('div', { class: 'empty-row' }, q ? `No repository matches “${ob.q.trim()}”.` : 'No repositories on your GitHub account yet.')),
+      hits.length > shown.length ? h('div', { class: 'repo-more small' }, `Showing ${shown.length} of ${hits.length}. Search to find the rest.`) : null,
+      h('div', { class: 'ob-link-wrap' }, obLinkForm('Or paste a link to any public repository')));
+  }
+
+  function obZip() {
+    const pick = (f) => {
+      if (!f) return;
+      if (!/\.zip$/i.test(f.name)) return toast('Choose a .zip file');
+      obImport(f.name.replace(/\.zip$/i, ''), () => importZip(f));
+    };
+    return h('section', { class: 'card ob-panel', key: 'zip' }, h('div', { class: 'card-pad' },
+      h('label', {
+        class: 'drop',
+        ondragover: (e) => { e.preventDefault(); e.currentTarget.classList.add('over'); },
+        ondragleave: (e) => e.currentTarget.classList.remove('over'),
+        ondrop: (e) => { e.preventDefault(); e.currentTarget.classList.remove('over'); pick(e.dataTransfer.files[0]); },
+      },
+      h('span', { class: 'drop-icon' }, icon('upload')),
+      h('span', { class: 'drop-title' }, 'Choose a .zip of your app, or drop it here'),
+      h('span', { class: 'small' }, `Up to ${C.me?.limits.uploadMb || 50} MB. Leave out node_modules and build output.`),
+      h('input', { type: 'file', accept: '.zip,application/zip', 'aria-label': 'Zip of your app', onchange: (e) => pick(e.currentTarget.files[0]) })),
+      h('p', { class: 'small' }, 'Changes come back as a patch and an updated zip, since there’s no repository to open a pull request on.')));
+  }
+
+  function obScanning(name) {
+    return [
+      obHead(`Reading ${name}…`, 'Usually under a minute. Liftoff copies the code into a private folder and scans it there.'),
+      h('section', { class: 'card ob-panel ob-scan', role: 'status' },
+        h('ul', { class: 'scan-lines' }, ['Copying the code', 'Working out the stack and platforms', 'Running the App Store pre-scan', 'Looking for leaked keys'].map((t) => h('li', { key: t }, h('span', { class: 'st', 'aria-hidden': 'true' }), t)))),
+    ];
+  }
+
+  function obScanned(app) {
+    const failing = app.cloud?.scan?.failing || [];
+    const p = pctOf(app);
+    const num = (n, label, alert) => h('div', { class: 'ob-num' + (alert ? ' alert' : '') }, h('b', {}, String(n)), h('span', {}, label));
+    return [
+      obHead(`${app.name} is in`, 'Here’s what the free scan found. All of it is on the app’s page too.'),
+      h('section', { class: 'card ob-panel ob-result' },
+        h('div', { class: 'ob-result-top' },
+          Board.avatar(app, true),
+          h('div', { class: 'grow' },
+            h('div', { class: 'nm' }, app.name),
+            h('div', { class: 'small' }, [`${app.platforms.map((x) => Board.PLATFORM[x] || x).join(', ')} app`, app.framework].filter(Boolean).join(' · '))),
+          h('div', { class: 'ring', style: { '--p': p }, title: 'Release readiness' }, h('b', {}, `${p}%`))),
+        h('div', { class: 'ob-nums' },
+          num(app.stepsTotal - app.stepsDone, 'launch steps to go'),
+          num(app.blockingTasks, 'blocking release', app.blockingTasks > 0),
+          num(failing.length, 'found in your code', failing.length > 0)),
+        failing.length
+          ? h('ul', { class: 'ob-found' }, failing.slice(0, 3).map((f) => {
+            const item = app.checklist.find((c) => c.id === f.id);
+            return h('li', { key: f.id }, icon('x'), h('div', {}, h('b', {}, item ? item.title : f.id), f.detail ? h('div', { class: 'small' }, f.detail) : null));
+          }), failing.length > 3 ? h('li', { class: 'more small', key: 'more' }, `and ${failing.length - 3} more`) : null)
+          : h('div', { class: 'empty-row' }, icon('checkCircle'), 'Nothing in the code needs fixing first.')),
+      obActs(
+        obNext('Continue', () => obGo(2)),
+        h('button', { class: 'btn quiet big', type: 'button', onclick: () => { C.ob.slug = null; obSave(); render(); } }, 'Use a different app')),
+    ];
+  }
+
+  function obAdd(app) {
+    const ob = C.ob;
+    if (ob.importing) return obScanning(ob.importing);
+    if (app) return obScanned(app);
+    const tab = (id, ic, label) => h('button', { class: 'seg-btn' + (ob.src === id ? ' on' : ''), type: 'button', role: 'tab', 'aria-selected': String(ob.src === id), onclick: () => { ob.src = id; render(); } }, icon(ic), label);
+    return [
+      obHead('Add your app', 'Pick a repository or upload a zip. Liftoff reads the code, works out the stack, and checks it for store problems and leaked keys. Nothing in your code changes until you start a run.'),
+      h('div', { class: 'seg', role: 'tablist', 'aria-label': 'Where your code is' }, tab('github', 'github', 'GitHub'), tab('zip', 'upload', 'Upload a zip')),
+      ob.src === 'zip' ? obZip() : obRepos(),
+      state.apps.length ? h('div', { class: 'ob-have' }, h('span', { class: 'small' }, 'Or carry on with one you already added'),
+        h('div', { class: 'row' }, state.apps.slice(0, 4).map((a) => h('button', { class: 'chip', key: a.slug, type: 'button', onclick: () => { ob.slug = a.slug; obGo(2); } }, Board.avatar(a), h('span', {}, a.name))))) : null,
+      obActs(obBack(0)),
+    ];
+  }
+
+  // 3. The services this app's steps use.
+  function obKeys(app) {
+    const list = app.accounts || [];
+    const done = list.filter((a) => a.connected).length;
+    return [
+      obHead(`Connect what ${app.name} uses`, 'Add a key once and every app you add can use it. Keys are encrypted on the server, and the cloud sandbox only ever sees a placeholder that turns into the real key on its way to that service.'),
+      h('section', { class: 'card ob-panel' },
+        h('div', { class: 'card-head' }, h('h2', {}, 'Services for this app'), h('span', { class: 'count' }, `${done}/${list.length}`), h('span', { class: 'end sub' }, 'All optional for now')),
+        h('div', { class: 'card-body rows' }, list.length ? list.map((a) => h('div', { class: 'line', key: a.id },
+          h('span', { class: 'tile' }, initials(a.label)),
+          h('div', { class: 'grow' }, h('div', { class: 'name' }, a.label), h('div', { class: 'small' }, a.connected ? `Connected ${a.connectedAt ? ago(a.connectedAt) : ''}`.trim() : a.note)),
+          accountAction(a))) : h('div', { class: 'empty-row' }, icon('checkCircle'), 'This app doesn’t need any service keys.'))),
+      h('p', { class: 'ob-note small' }, icon('clock'), `No keys handy? Skip this. ${ai()} asks for one when a step needs it, and they all live under Accounts.`),
+      obActs(obNext('Continue', () => obGo(3)), obBack(1)),
+    ];
+  }
+
+  // 4. Free versus the Launch Pass.
+  function obPlans(app) {
+    const p = app.cloud?.pass;
+    const list = (items) => h('ul', { class: 'pass-list' }, items.map((x) => h('li', { key: x }, icon('check'), h('span', {}, x))));
+    const status = !p || !p.enabled ? h('span', { class: 'pill good' }, icon('check'), 'Included on this server')
+      : p.free ? h('span', { class: 'pill good' }, icon('check'), 'Included with your account')
+        : p.pass ? h('span', { class: 'pill good' }, icon('check'), `Active for ${app.name}`)
+          : h('span', { class: 'small' }, `Get it on ${app.name}’s page when you’re ready to launch.`);
+    return [
+      obHead('What’s free, and what the Launch Pass adds', 'Everything that shows where your app stands is free, for every app. The Launch Pass is for getting it done: one payment per app, no subscription.'),
+      h('div', { class: 'ob-plans' },
+        h('section', { class: 'card ob-plan' },
+          h('div', { class: 'plan-top' }, h('h2', {}, 'Free'), h('span', { class: 'pill sm' }, 'Every app')),
+          h('p', { class: 'small' }, 'See exactly what’s left, and keep an eye on it after launch.'),
+          list(['The scan: stack, platforms, store rules and leaked keys', 'A launch score and the list of what’s left', 'Verify: real checks against your live services', 'Pulse: sign-ups, revenue and crashes in one place']),
+          h('div', { class: 'plan-foot' }, h('span', { class: 'pill good' }, icon('check'), 'On now'))),
+        h('section', { class: 'card ob-plan pass' },
+          h('div', { class: 'plan-top' }, h('h2', {}, 'Launch Pass'), h('span', { class: 'pill sm' }, 'Per app')),
+          h('p', { class: 'small' }, `${ai()} does the launch with you, then Liftoff proves it works.`),
+          list([`${ai()} does the launch steps in a private cloud sandbox`, 'Changes come back as a pull request, or a patch for zips', 'A real test purchase in Liftoff’s own browser, with screenshots', 'A launch report and the “Launch certified” badge', p?.enabled && p.price?.tokens ? `${tok(p.price.tokens)} for runs included` : null].filter(Boolean)),
+          h('div', { class: 'plan-foot' }, status))),
+      obActs(obNext(`Open ${app.name}`, () => obDone(app.slug)), obBack(2)),
+    ];
+  }
+
+  function welcomeView() {
+    const ob = C.ob;
+    const app = ob.slug ? appOf(ob.slug) : null;
+    if (state.lastSync) {
+      // The app was deleted since: pick again.
+      if (ob.slug && !app) { ob.slug = null; obSave(); }
+      if (ob.step > 1 && !ob.slug) ob.step = 1;
+    }
+    const body = ob.step === 0 ? obHello()
+      : ob.step === 1 ? obAdd(app)
+        : !app ? h('div', { class: 'ob-head' }, h('p', {}, 'Loading…'))
+          : ob.step === 2 ? obKeys(app) : obPlans(app);
+    return [obTop(), h('div', { class: 'ob-step', key: `step-${ob.step}-${ob.importing ? 'scan' : app ? 'app' : 'pick'}` }, body)];
+  }
+
+  function tourCard() {
+    return h('section', { class: 'card narrow' },
+      h('div', { class: 'card-head' }, h('h2', {}, 'Getting started')),
+      h('div', { class: 'card-body rows' },
+        h('div', { class: 'line' },
+          h('span', { class: 'tile' }, icon('rocket')),
+          h('div', { class: 'grow' }, h('div', { class: 'name' }, 'Welcome tour'), h('div', { class: 'small' }, 'Add an app, connect the services it uses, and see what’s free, in four short steps.')),
+          h('button', { class: 'btn', type: 'button', onclick: obStart }, 'Start tour'))));
   }
 
   // ---------- accounts ----------
@@ -438,7 +749,7 @@
       h('h1', {}, 'Account settings'),
       h('p', {}, 'Your profile, how Liftoff Cloud looks, and how your runs start.')));
     if (!C.me) return [head, h('div', { class: 'card narrow empty' }, h('p', {}, 'Loading your settings…'))];
-    return [head, profileCard(C.me), appearanceCard(), runsCard(C.me), C.me.admin ? recordsCard() : null, connectionsCard(C.me), sessionsCard(), dangerCard()];
+    return [head, profileCard(C.me), appearanceCard(), runsCard(C.me), C.me.admin ? recordsCard() : null, connectionsCard(C.me), tourCard(), sessionsCard(), dangerCard()];
   }
 
   // ---------- run records (admins only) ----------
@@ -1283,6 +1594,7 @@
     },
     views: {
       add: { title: 'Add an app', render: addView },
+      welcome: { title: 'Welcome', render: welcomeView },
       settings: { title: 'Account settings', render: settingsView },
       records: { title: 'Run records', render: recordsView },
       run: { get title() { const a = appOf(C.slug); return a ? `${a.name} · Launch run` : 'Launch run'; }, render: runView, key: () => `${C.slug}:${C.loading ? 'loading' : C.run?.id || 'new'}` },
@@ -1307,6 +1619,7 @@
       h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Welcome to Liftoff Cloud'),
         h('p', {}, `Add your app to see what stands between it and real users. Then let ${ai()} set it up, step by step, in the cloud.`))),
       addForms(),
+      h('div', { class: 'row tour-nudge' }, h('span', { class: 'small' }, 'New here?'), h('button', { class: 'btn quiet sm', type: 'button', onclick: obStart }, icon('play'), 'Take the two-minute tour')),
     ],
     overviewIntro: (apps) => `${Board.plural(apps.length, 'app')} in Liftoff Cloud. Here is what needs you first.`,
     overviewActions: () => h('button', { class: 'btn primary', onclick: () => go('add') }, icon('plus'), 'Add an app'),
@@ -1327,6 +1640,12 @@
     stepsHeadEnd: (app) => h('button', { class: 'btn', onclick: () => openRun(app.slug) }, icon('play'), `Run with ${ai()}`),
     mainBottom: settingsCard,
     afterRender: () => {
+      document.body.classList.toggle('ob-on', state.view === 'welcome');
+      // A new account with no apps starts on the welcome tour, once.
+      if (!C.obChecked && C.me && state.lastSync) {
+        C.obChecked = true;
+        if (!C.me.prefs?.onboarded && !state.apps.length && state.view === 'overview') queueMicrotask(obStart);
+      }
       const ta = document.querySelector('.composer textarea');
       if (ta) grow(ta);
       const t = document.querySelector('.thread');

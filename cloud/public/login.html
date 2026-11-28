@@ -10,32 +10,93 @@
 <link rel="stylesheet" href="/cloud.css">
 </head>
 <body class="login-page">
-<main class="login">
-  <div class="login-glow" aria-hidden="true"></div>
-  <div class="login-card card">
-    <div class="login-mark" aria-hidden="true"><span class="mark"><svg class="i" viewBox="0 0 24 24"><path d="M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2c.8-.8.8-2.2 0-3s-2.2-.8-3 0z"/><path d="M9 12a22 22 0 0 1 11-9c0 3-1 7.5-9 11z"/><path d="M9 12H4s.5-3 2-4c1.6-1 5 0 5 0"/><path d="M12 15v5s3-.5 4-2c1-1.6 0-5 0-5"/></svg></span></div>
-    <p class="login-kicker">Liftoff Cloud</p>
-    <h1>Launch your app <span class="grad-text">from the browser</span></h1>
-    <p class="lede">Bring a GitHub repo or a zip. Liftoff scans it, shows what's left before real users, and <span data-ai>Pilot</span>, Liftoff's launch assistant, sets up payments, hosting, analytics, CI and the rest in a private cloud sandbox.</p>
-    <p class="error" id="error" role="alert" hidden></p>
-    <p class="note-box notice" id="notice" role="status" hidden></p>
-    <div class="login-actions" id="actions">
-      <a class="btn primary big" id="github" href="/auth/github" hidden>
-        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/></svg>
-        Sign in with GitHub
-      </a>
-      <form method="post" action="/auth/dev" id="dev" hidden>
-        <button class="btn big" type="submit">Continue on this machine</button>
-      </form>
-      <p class="small" id="none" hidden>Sign-in isn't set up on this server yet. See cloud/README.md.</p>
+<div class="signin">
+  <section class="signin-side">
+    <header class="signin-top">
+      <span class="brand"><span class="mark"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2c.8-.8.8-2.2 0-3s-2.2-.8-3 0z"/><path d="M9 12a22 22 0 0 1 11-9c0 3-1 7.5-9 11z"/><path d="M9 12H4s.5-3 2-4c1.6-1 5 0 5 0"/><path d="M12 15v5s3-.5 4-2c1-1.6 0-5 0-5"/></svg></span><span>Liftoff Cloud</span></span>
+      <button class="btn quiet icon-only theme-btn" id="theme" type="button" aria-label="Switch to dark mode" title="Switch to dark mode">
+        <svg class="i only-light" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+        <svg class="i only-dark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>
+      </button>
+    </header>
+
+    <main class="signin-main">
+      <h1>Sign in to Liftoff Cloud</h1>
+      <p class="lede">Bring the app you built, as a GitHub repo or a zip. Liftoff shows what’s left before real people can sign up and pay, then sets it up with you.</p>
+      <p class="error" id="error" role="alert" hidden></p>
+      <p class="note-box notice" id="notice" role="status" hidden></p>
+      <div class="login-actions" id="actions">
+        <a class="btn primary big" id="github" href="/auth/github" hidden>
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/></svg>
+          Continue with GitHub
+        </a>
+        <div class="or" id="or" hidden><span>or</span></div>
+        <form method="post" action="/auth/dev" id="dev" hidden>
+          <button class="btn big" type="submit">
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 7 5 5-5 5M12 19h7"/></svg>
+            Continue on this machine
+          </button>
+        </form>
+        <p class="small" id="none" hidden>Sign-in isn’t set up on this server yet. See cloud/README.md.</p>
+      </div>
+      <details class="perm" id="perm" hidden>
+        <summary><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z"/><path d="m9 12 2 2 4-4"/></svg>What Liftoff can see on GitHub<svg class="i chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+        <ul>
+          <li>Your name and profile picture</li>
+          <li>Your repositories, private ones too, so you can import them</li>
+          <li>The branches and pull requests it opens for you to review</li>
+        </ul>
+        <p>Take it back any time in GitHub settings, under Applications.</p>
+      </details>
+      <p class="small first-time" id="first-time" hidden>New here? Signing in creates your account, and scanning an app is free.</p>
+    </main>
+
+    <footer class="signin-foot">
+      <span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9.5" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>Keys are encrypted on the server</span>
+      <span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg>Asks before anything costs money or goes live</span>
+    </footer>
+  </section>
+
+  <aside class="signin-show" aria-hidden="true">
+    <div class="show-stage">
+      <div class="show-app">
+        <div class="show-app-top">
+          <span class="avatar lg show-avatar">G</span>
+          <div class="grow">
+            <div class="show-name">Greenrow</div>
+            <div class="show-sub">Web app · Next.js · Supabase</div>
+          </div>
+          <span class="ring show-ring"><b>78%</b></span>
+        </div>
+        <ul class="show-steps">
+          <li class="done"><span class="st"></span><span class="t">Deploy and domain</span><span class="pill good sm">Done</span></li>
+          <li class="done"><span class="st"></span><span class="t">Payments</span><span class="pill good sm">Done</span></li>
+          <li class="work"><span class="st"></span><span class="t">Sign-in</span><span class="pill run sm"><span class="d"></span>Working</span></li>
+          <li class="todo"><span class="st"></span><span class="t">Analytics</span><span class="pill sm">To do</span></li>
+          <li class="todo"><span class="st"></span><span class="t">Crash tracking</span><span class="pill sm">To do</span></li>
+        </ul>
+      </div>
+      <div class="show-ask">
+        <div class="show-ask-top"><span class="ask-badge"><svg class="i" viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg><span data-ai>Pilot</span> asks</span><span class="small">just now</span></div>
+        <p>Add the sign-in callback for greenrow.app in Supabase?</p>
+        <div class="show-ask-acts"><span class="fake-btn">Not now</span><span class="fake-btn ink">Allow</span></div>
+      </div>
+      <div class="show-pr">
+        <span class="show-pr-icon"><svg class="i" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4M13 4l-2 2 2 2"/></svg></span>
+        <div class="grow"><div class="show-pr-t">Add Stripe checkout</div><div class="small">Pull request ready for review</div></div>
+        <span class="show-diff"><b class="plus">+312</b> <b class="minus">−18</b></span>
+      </div>
     </div>
-    <ul class="points">
-      <li>Your keys are encrypted on the server. <span data-ai>Pilot</span>'s sandbox only sees placeholders that turn into the real key on the way to that service.</li>
-      <li><span data-ai>Pilot</span> asks before anything that spends money, changes DNS or goes live.</li>
-      <li>Changes come back as a pull request (or a patch, for zips) for you to review.</li>
-    </ul>
-  </div>
-</main>
+    <div class="show-copy">
+      <h2>Everything between your app and its first paying users</h2>
+      <ol>
+        <li><b>Scan for free.</b> Payments, hosting, sign-in, store rules and leaked keys, checked in about a minute.</li>
+        <li><b>Set it up with you.</b> <span data-ai>Pilot</span>, Liftoff’s launch assistant, works in a private sandbox and hands changes back as a pull request.</li>
+        <li><b>Prove it works.</b> Real checks against your live services, and a launch report you can share.</li>
+      </ol>
+    </div>
+  </aside>
+</div>
 <script src="/login.js"></script>
 </body>
 </html>
