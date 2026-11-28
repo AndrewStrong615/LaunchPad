@@ -236,6 +236,17 @@ test('verify proves the purchase flow from Stripe: paid, cancelled, webhook took
   r = await only('cs_test_zz99', stripeRecords());
   assert.equal(r.ok, false);
   assert.match(r.detail, /doesn't list the test checkout cs_test_…zz99 as complete and paid/);
+
+  // A purchase test that failed outranks Stripe's records from before it;
+  // a purchase after it counts again. The test's own checkout is judged alone.
+  const after = async (at, fetch = stripeRecords()) => (await runVerify(s, { env: { STRIPE_SECRET_KEY: 'sk_test_x' }, only: ['pay-e2e'], fetch, failedTest: { at, detail: 'Pro stayed on' } }))[0];
+  r = await after(new Date().toISOString());
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /purchase test failed on \d{4}-\d{2}-\d{2} \(Pro stayed on\), and there's no test purchase since/);
+  r = await after(new Date(Date.now() - 86_400_000).toISOString());
+  assert.equal(r.ok, true, r.detail);
+  r = (await runVerify(s, { env: { STRIPE_SECRET_KEY: 'sk_test_x' }, only: ['pay-e2e'], fetch: stripeRecords(), checkout: 'cs_test_a1b2c3d4e5f6', failedTest: { at: new Date().toISOString() } }))[0];
+  assert.equal(r.ok, true, r.detail);
 });
 
 test('the purchase flow is server-proven only for web apps that pay through Stripe', async () => {

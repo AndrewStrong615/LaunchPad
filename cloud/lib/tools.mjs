@@ -146,12 +146,21 @@ function checklistView(state, hasStripe) {
   });
 }
 
+// The newest purchase test Liftoff's browser finished, when it failed because
+// of the app (lib/proof.mjs): until a test passes again, pay-e2e only counts
+// purchases made after it, so a full Verify can't re-tick what the test caught.
+export function failedPurchaseTest(state) {
+  const last = (state.proof?.history || []).find((p) => p.status === 'passed' || p.status === 'failed');
+  return last?.status === 'failed' ? { at: last.at, detail: last.detail || null } : null;
+}
+
 // Server-side verify (and the Flight Board's Verify button).
 // `extra` passes check options through, like { checkout } after a purchase test.
 export async function verifyApp(ctx, uid, slug, only = null, extra = {}) {
   const snap = ctx.store.loadApp(uid, slug);
   if (!snap) throw new HttpError(404, 'No such app');
   const results = await runVerify(snap, {
+    failedTest: failedPurchaseTest(snap),
     ...extra,
     env: userEnv(ctx.store, uid),
     files: walk(snap.root),

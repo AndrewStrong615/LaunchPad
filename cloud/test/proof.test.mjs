@@ -16,7 +16,7 @@ const PREVIEW = 'https://invoicely-git-main-me.vercel.app';
 const JPEG = Buffer.from('ffd8ffe000104a46494600010100000100010000ffd9', 'hex').toString('base64');
 
 // A stand-in for proof/server.mjs that checks signatures and plays a script.
-// outcome: 'pass' | 'no-pro' | 'live'
+// outcome: 'pass' | 'no-pro' | 'live' | 'still-pro' (Pro stays on after the cancel)
 async function fakeBrowser() {
   const b = { outcome: 'pass', jobs: new Map(), continued: [], seen: [], unsigned: 0 };
   const steps = (names) => names.map((name) => ({ name, ok: true, detail: `did ${name}`, shot: name === 'cancel' ? null : JPEG }));
@@ -53,6 +53,11 @@ async function fakeBrowser() {
         job.sessionId = 'cs_test_a1fresh0001';
       }
       if (job.phase === 'waiting') return send(200, { id: job.id, phase: 'waiting', sessionId: job.sessionId, steps: steps(['open', 'sign-up', 'checkout', 'pro']).map(({ shot, ...s }) => ({ ...s, shot: !!shot })) });
+      if (job.answer && b.outcome === 'still-pro') {
+        const all = steps(['open', 'sign-up', 'checkout', 'pro', 'cancel']);
+        all.push({ name: 'locked', ok: false, detail: 'Pro was still on after the cancel', shot: JPEG });
+        return send(200, { id: job.id, phase: 'done', steps: [], result: { ok: false, failedAt: 'locked', detail: 'Cancelled in Stripe, but the app kept Pro switched on', sessionId: job.sessionId, steps: all } });
+      }
       if (job.answer) {
         const names = job.answer.cancelled ? ['open', 'sign-up', 'checkout', 'pro', 'cancel', 'locked'] : ['open', 'sign-up', 'checkout', 'pro', 'cancel'];
         const all = steps(names);
@@ -80,7 +85,7 @@ async function fakeBrowser() {
 
 // Stripe test mode as the cancel and the pay-e2e check see it.
 function fakeStripe() {
-  const s = { cancelled: [], keys: [], delivered: true };
+  const s = { cancelled: [], keys: [], delivered: true, successUrl: 'https://somewhere-else.example.com/thanks' };
   s.fetch = async (url, opts = {}) => {
     const u = new URL(url);
     const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -88,7 +93,7 @@ function fakeStripe() {
     s.keys.push(opts.headers?.authorization);
     const p = u.pathname.replace('/v1/', '');
     const subStatus = s.cancelled.includes('sub_fresh') ? 'canceled' : 'active';
-    const session = { id: 'cs_test_a1fresh0001', status: 'complete', mode: 'subscription', payment_status: 'paid', created: Math.floor(Date.now() / 1000) - 60, success_url: 'https://somewhere-else.example.com/thanks', subscription: { id: 'sub_fresh', status: subStatus } };
+    const session = { id: 'cs_test_a1fresh0001', status: 'complete', mode: 'subscription', payment_status: 'paid', created: Math.floor(Date.now() / 1000) - 60, success_url: s.successUrl, subscription: { id: 'sub_fresh', status: subStatus } };
     if (p === 'checkout/sessions/cs_test_a1fresh0001') return json({ ...session, subscription: 'sub_fresh' });
     if (p === 'subscriptions/sub_fresh' && opts.method === 'DELETE') {
       s.cancelled.push('sub_fresh');
@@ -237,6 +242,44 @@ test('a broken purchase unticks pay-e2e; a live checkout or a missing browser do
     assert.match(p.blocker, /isn't set up/);
   } finally {
     await t2.stop();
+  }
+});
+
+test('a full Verify does not re-tick a purchase the test saw fail, until a test passes again', async () => {
+  const { me, browser, stripe, slug, close } = await setup();
+  try {
+    await me.post('/api/accounts/stripe', { values: { STRIPE_SECRET_KEY: 'sk_test_proof' } });
+    await me.post(`/api/apps/${slug}/settings`, { key: 'preview.url', value: PREVIEW });
+    // The purchase lands on the app's own preview, so the plain Verify sees it in Stripe too.
+    stripe.successUrl = `${PREVIEW}/thanks`;
+    const finished = () => until(async () => {
+      const p = (await me.get(`/api/apps/${slug}`)).body.cloud.proof;
+      return !['queued', 'running'].includes(p.latest.status) && p.latest;
+    }, { timeout: 10000 });
+    const payE2e = async () => (await me.get(`/api/apps/${slug}`)).body.checklist.find((c) => c.id === 'pay-e2e');
+
+    // Cancelled users keep Pro: Stripe shows paid, cancelled and delivered, but the test failed.
+    browser.outcome = 'still-pro';
+    await me.post(`/api/apps/${slug}/proof`);
+    const rec = await finished();
+    assert.equal(rec.status, 'failed');
+    assert.equal(rec.failedAt, 'locked');
+    assert.equal((await payE2e()).done, false);
+
+    // Pressing Verify again reads those Stripe records, and must not tick it back.
+    let item = (await me.post(`/api/apps/${slug}/verify`)).body.checklist.find((c) => c.id === 'pay-e2e');
+    assert.equal(item.done, false);
+    assert.equal(item.verify.ok, false);
+    assert.match(item.verify.detail, /the purchase test failed on \d{4}-\d{2}-\d{2} \(Cancelled in Stripe, but the app kept Pro switched on\), and there's no test purchase since/);
+
+    // Once a test passes again, the plain Verify counts the purchases again.
+    browser.outcome = 'pass';
+    await me.post(`/api/apps/${slug}/proof`);
+    assert.equal((await finished()).status, 'passed');
+    item = (await me.post(`/api/apps/${slug}/verify`)).body.checklist.find((c) => c.id === 'pay-e2e');
+    assert.equal(item.done, true, item.verify?.detail);
+  } finally {
+    await close();
   }
 });
 
