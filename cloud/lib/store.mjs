@@ -9,6 +9,7 @@
 //   sessions/<sid>.json                sign-in sessions (each names its user)
 //   github/<id>.json                   GitHub user id -> uid
 //   public/<id>.json                   a shared report or badge link -> { uid, slug }
+//   records/runs/<id>.json             anonymous run records (lib/records.mjs), kept after deletes
 //
 // Writes are atomic (temp file + rename). Everything is read and written
 // synchronously, so a read-modify-write never interleaves with another request.
@@ -25,7 +26,7 @@ const RUN = /^r_[a-z0-9]{6,32}$/;
 const SID = /^[A-Za-z0-9_-]{40,64}$/;
 const SESSION_DAYS = 30;
 
-function readJson(file, fallback = null) {
+export function readJson(file, fallback = null) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {
@@ -33,7 +34,7 @@ function readJson(file, fallback = null) {
   }
 }
 
-function writeJson(file, data, mode = 0o600) {
+export function writeJson(file, data, mode = 0o600) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { mode });

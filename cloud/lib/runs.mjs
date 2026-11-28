@@ -90,6 +90,8 @@ export class RunManager {
   save(run) {
     if (run.events.length > MAX_EVENTS) run.events = run.events.slice(-MAX_EVENTS);
     this.ctx.store.saveRun(run);
+    // Once it stops working, its run record says how it went (lib/records.mjs).
+    this.ctx.records?.settle(run);
   }
 
   push(run, ev) {
@@ -156,6 +158,7 @@ export class RunManager {
       seq: 0,
     };
     this.live.set(run.id, run);
+    this.ctx.records?.begin(run, state);
     this.push(run, { kind: 'status', text: ordered.length ? `Starting a run for ${ordered.map((id) => STEPS.find((s) => s.id === id)?.label || id).join(', ')}` : 'Starting a run for every step that is left' });
     this.save(run);
     store.updateApp(uid, slug, (s) => s.log.push({ at: run.createdAt, msg: `Started a cloud run (${ordered.length ? ordered.join(', ') : 'all remaining steps'})` }));
