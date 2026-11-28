@@ -61,7 +61,7 @@ Open `http://localhost:8787` (not 127.0.0.1: the address must match `PUBLIC_URL`
 
 ```
 ANTHROPIC_API_KEY=sk-ant-... npm run dev      # cloud runs too
-npm test                                      # 22 tests, no network needed
+npm test                                      # 26 tests, no network needed
 ```
 
 ## Deploy on Render
