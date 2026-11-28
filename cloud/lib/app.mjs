@@ -370,7 +370,7 @@ export function createApp(ctx) {
       if (rest.length === 0 && M === 'DELETE') {
         if (runs.list(uid, slug).some((r) => LIVE.has(r.status) || r.status === 'budget')) throw new HttpError(409, 'Stop the run first.');
         if (ctx.proof.running(uid, slug)) throw new HttpError(409, 'Wait for the purchase test to finish.');
-        ctx.billing.appRemoved(uid, slug);
+        await ctx.billing.appRemoved(uid, slug);
         store.deleteApp(uid, slug);
         return ok({ deleted: slug });
       }
@@ -405,6 +405,19 @@ export function createApp(ctx) {
         // Stripe Checkout for this app's Launch Pass (lib/billing.mjs).
         limit(`pass:${uid}`, 20, 3600000);
         return ok(await ctx.billing.checkout(uid, slug));
+      }
+      if (rest[0] === 'pro' && M === 'POST') {
+        // Pro, the monthly plan for watching this app: Checkout to start it,
+        // renew to stop it renewing or keep it, billing for Stripe's own page.
+        limit(`pass:${uid}`, 20, 3600000);
+        if (rest.length === 1) return ok(await ctx.billing.proCheckout(uid, slug));
+        if (rest[1] === 'renew' && rest.length === 2) {
+          const body = await readJson(req);
+          if (typeof body.renew !== 'boolean') throw new HttpError(400, 'renew is true or false.');
+          await ctx.billing.setRenewal(uid, slug, body.renew);
+          return ok(view(uid, store.loadApp(uid, slug)));
+        }
+        if (rest[1] === 'billing' && rest.length === 2) return ok(await ctx.billing.billingPage(uid, slug));
       }
       if (rest[0] === 'report') {
         // A launch report (lib/report.mjs): make one after a fresh verify, or take one down.
@@ -557,11 +570,11 @@ export function createApp(ctx) {
     const origin = originOf();
     const url = new URL(req.url, origin);
     try {
-      // Stripe's webhook for the Launch Pass: signed by Stripe, not sent from our pages.
+      // Stripe's webhook for the Launch Pass and Pro: signed by Stripe, not sent from our pages.
       if (url.pathname === '/billing/stripe-webhook' && req.method === 'POST') {
         limit('stripe-webhook', 600, 60000);
         const raw = await readRaw(req, 512 * 1024);
-        return send(res, 200, ctx.billing.webhook(raw.toString('utf8'), req.headers['stripe-signature']));
+        return send(res, 200, await ctx.billing.webhook(raw.toString('utf8'), req.headers['stripe-signature']));
       }
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         // Writes only from this site's own pages.
@@ -585,13 +598,13 @@ export function createApp(ctx) {
         }
         if (url.pathname === '/login/options') return send(res, 200, { github: github.oauthEnabled, dev: config.devLogin, assistant: config.assistant });
         if (url.pathname === '/billing/done') {
-          // Back from Stripe Checkout: the pass is granted from Stripe's own record of it.
+          // Back from Stripe Checkout: the pass or Pro is granted from Stripe's own record of it.
           const me = signedIn(req);
           if (!me) return redirect(res, '/login');
           try {
             limit(`pass:${me.user.id}`, 20, 3600000);
-            const { slug, paid } = await ctx.billing.confirm(me.user.id, url.searchParams.get('session_id'));
-            return redirect(res, `/?pass=${paid ? 'ok' : 'pending'}#${encodeURIComponent(slug)}`);
+            const { slug, paid, kind } = await ctx.billing.confirm(me.user.id, url.searchParams.get('session_id'));
+            return redirect(res, `/?${kind === 'pro' ? 'pro' : 'pass'}=${paid ? 'ok' : 'pending'}#${encodeURIComponent(slug)}`);
           } catch (e) {
             if (!(e instanceof HttpError)) console.error('[liftoff-cloud] /billing/done:', e?.stack || e);
             return redirect(res, '/?pass=error');

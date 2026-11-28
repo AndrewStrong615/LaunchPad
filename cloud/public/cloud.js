@@ -1277,16 +1277,51 @@
       h('span', { class: 'end sub' }, w.watching && w.uptime ? `Checked ${ago(w.uptime.at)}` : w.paused ? 'Paused' : ''));
     const what = `Liftoff checks ${w.target ? hostOf(w.target) : 'your live site'} every ${w.everyMinutes} minutes, runs every check again once a day, and tells you when something breaks.`;
 
+    // Pro (lib/billing.mjs), the monthly plan that pays for watching.
+    const price = app.cloud?.pass?.pro ? `${usd0(app.cloud.pass.pro.usd)}/month` : '';
+    const startPro = (e) => busy(e.currentTarget, async () => {
+      const { url } = await post(`/api/apps/${app.slug}/pro`);
+      location.href = url;
+    });
+    const renew = (on) => (e) => busy(e.currentTarget, async () => {
+      await post(`/api/apps/${app.slug}/pro/renew`, { renew: on });
+      toast(on ? 'Pro renews again' : 'Pro won’t renew. Liftoff keeps watching until the month you paid for ends.');
+      await refresh(true);
+    });
+    const billingPage = (e) => busy(e.currentTarget, async () => {
+      const { url } = await post(`/api/apps/${app.slug}/pro/billing`);
+      location.href = url;
+    });
+    const planBlock = (text, buttons, tone = '') => h('div', { class: `watch-plan${tone ? ` ${tone}` : ''}` },
+      h('p', { class: 'small' }, text), buttons.length ? h('div', { class: 'row' }, buttons) : null);
+    const plan = () => {
+      const pro = w.pro;
+      if (pro?.via === 'pass') {
+        return planBlock(`Included with the Launch Pass until ${shortDay(pro.until)}. To keep watching after that, add Pro (${price}): nothing is charged before ${shortDay(pro.until)}.`,
+          [h('button', { class: 'btn', onclick: startPro }, icon('activity'), 'Add Pro')]);
+      }
+      const p = pro?.via === 'pro' ? pro.plan : null;
+      if (!p) return null;
+      const manage = app.cloud.pass.pro?.billingPage ? h('button', { class: 'btn quiet', onclick: billingPage }, 'Billing') : null;
+      if (p.pastDue) return planBlock('Stripe couldn’t take the last Pro payment and is trying again. Update the card so watching doesn’t stop.', [h('button', { class: 'btn primary', onclick: billingPage }, 'Update the card')], 'bad');
+      if (p.endsAt) return planBlock(`Pro ends on ${shortDay(p.endsAt)}, and watching stops then.`, [h('button', { class: 'btn', onclick: renew(true) }, 'Keep Pro'), manage].filter(Boolean));
+      const when = p.chargesFrom ? `first payment on ${shortDay(p.chargesFrom)}, when the Launch Pass days end` : p.renewsAt ? `renews on ${shortDay(p.renewsAt)}` : 'monthly';
+      return planBlock(`Pro: ${price}, ${when}.`, [manage, h('button', { class: 'btn quiet', onclick: renew(false) }, 'Cancel Pro')].filter(Boolean));
+    };
+
     if (!w.watching) {
       const body = [h('p', { class: 'small watch-what' }, what)];
       if (w.why === 'no-live-url') body.push(h('p', { class: 'small watch-note' }, 'Add the live address under Deployments and watching starts on its own.'));
       if (w.why === 'not-pro') {
-        body.push(h('p', { class: 'small watch-note' }, w.pro?.via === 'ended' ? `The 30 days of watching that came with this app’s Launch Pass ended on ${shortDay(w.pro.until)}.` : 'Part of Pro. The first 30 days come with the Launch Pass.'));
-        if (w.pro?.via === 'none') body.push(h('div', { class: 'row' }, passHint()));
+        const ended = w.pro?.via === 'ended';
+        body.push(h('p', { class: 'small watch-note' }, ended
+          ? `The 30 days of watching that came with this app’s Launch Pass ended on ${shortDay(w.pro.until)}. Pro keeps it going for ${price}, and you can cancel any time.`
+          : `Watching is part of Pro: ${price} for this app, and you can cancel any time. A Launch Pass includes the first 30 days.`),
+        h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: startPro }, icon('activity'), `${ended ? 'Keep watching' : 'Start Pro'} · ${price}`)));
       }
       if (w.why === 'paused') {
         body.push(h('p', { class: 'small watch-note' }, 'Paused: Liftoff isn’t checking this app.'),
-          h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: pause(false) }, icon('play'), 'Watch again')));
+          h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: pause(false) }, icon('play'), 'Watch again')), plan());
       }
       return h('section', { class: 'card watch off' }, head, h('div', { class: 'card-body' }, body));
     }
@@ -1319,8 +1354,8 @@
         h('p', { class: 'small watch-alerts' }, C.me?.alerts?.channel ? `Alerts go to ${C.me.alerts.channel.label}.` : 'Get alerts in Slack or Discord: ', C.me?.alerts?.channel ? null : h('button', { class: 'link', type: 'button', onclick: () => go('settings') }, 'add a webhook in Account settings')),
         h('div', { class: 'row' },
           h('button', { class: 'btn', onclick: checkNow }, icon('refresh'), 'Check now'),
-          h('button', { class: 'btn quiet', onclick: pause(true) }, 'Pause watching'),
-          w.pro?.via === 'pass' ? h('span', { class: 'small end' }, `Included with the Launch Pass until ${shortDay(w.pro.until)}`) : null)));
+          h('button', { class: 'btn quiet', onclick: pause(true) }, 'Pause watching')),
+        plan()));
   }
 
   // An app that's already live: its address, so the free Verify can check
@@ -1367,7 +1402,8 @@
       h('div', { class: 'row danger-zone' },
         h('span', { class: 'small grow' }, 'Removing deletes the imported code, records and run history from Liftoff Cloud. Nothing changes in your repo or services.'),
         h('button', { class: 'btn danger', onclick: (e) => busy(e.currentTarget, async () => {
-          if (!confirm(`Remove ${app.name} from Liftoff Cloud?`)) return;
+          const plan = app.cloud?.watch?.pro?.via === 'pro' && !app.cloud.watch.pro.plan?.endsAt;
+          if (!confirm(`Remove ${app.name} from Liftoff Cloud?${plan ? ' Its Pro plan stops renewing.' : ''}`)) return;
           await api(`/api/apps/${app.slug}`, { method: 'DELETE' });
           await refresh(true);
           go('overview');
@@ -1962,7 +1998,13 @@
   const back = new URLSearchParams(location.search).get('pass');
   if (back) {
     history.replaceState(null, '', location.pathname + location.hash);
-    const said = { ok: 'Launch Pass active. Runs, the purchase test and reports are open for this app.', pending: 'Stripe is still confirming the payment. The pass turns on as soon as it does.', error: 'Couldn’t confirm that checkout. If you paid, the pass turns on once Stripe tells Liftoff.' }[back];
+    const said = { ok: 'Launch Pass active. Runs, the purchase test and reports are open for this app.', pending: 'Stripe is still confirming the payment. The pass turns on as soon as it does.', error: 'Couldn’t confirm that checkout. If you paid, it turns on once Stripe tells Liftoff.' }[back];
+    if (said) setTimeout(() => toast(said), 600);
+  }
+  const backPro = new URLSearchParams(location.search).get('pro');
+  if (backPro) {
+    history.replaceState(null, '', location.pathname + location.hash);
+    const said = { ok: 'Pro is on. Liftoff keeps watching this app.', pending: 'Stripe is still confirming. Pro turns on as soon as it does.' }[backPro];
     if (said) setTimeout(() => toast(said), 600);
   }
 
