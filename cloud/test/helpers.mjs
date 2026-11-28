@@ -66,6 +66,7 @@ export async function startTest({ env = {}, fetch, anthropic = null, safeFetch, 
     LIFTOFF_DATA_DIR: dataDir,
     LIFTOFF_DEV_LOGIN: '1',
     LIFTOFF_ALLOW_PRIVATE_FETCH: '1',
+    LIFTOFF_CHECK_KEYS: '0',
     ...(anthropic ? { ANTHROPIC_API_KEY: 'test', LIFTOFF_AGENT_ID: 'agent_test', LIFTOFF_ENVIRONMENT_ID: 'env_test' } : {}),
     ...env,
   });

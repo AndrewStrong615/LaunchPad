@@ -520,6 +520,16 @@ dialog.modal form { padding: 20px 20px 18px; }
 .modal-head h2 { margin: 2px 0 2px; font-size: 17px; letter-spacing: -.015em; }
 .modal-head p { margin: 0; }
 dialog.modal .acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+/* The longer dialog for a service of your own: scrolls on short screens. */
+dialog.modal.wide { width: min(540px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; }
+details.more { margin-top: 6px; border-top: 1px solid var(--line-2); padding-top: 4px; }
+details.more > summary { display: flex; align-items: center; gap: 6px; padding: 8px 0 2px; cursor: pointer; list-style: none; font-size: 13px; font-weight: 550; color: var(--ink-2); }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary .i { width: 14px; height: 14px; color: var(--faint); transition: transform var(--mid) var(--spring); }
+details.more[open] > summary .i { transform: rotate(90deg); }
+.field[hidden] { display: none; }
+.own-intro { margin: 2px 0 12px; }
+button.link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 
 /* ---------- sign-in ----------
    Split screen: the form on the left, a quiet picture of Liftoff at work on the
@@ -861,6 +871,9 @@ dialog.modal .acts { display: flex; gap: 8px; justify-content: flex-end; margin-
 .ob-found li b { font-weight: 600; }
 .ob-found li.more { padding-left: 26px; }
 .ob-result .empty-row { padding: 16px 18px; }
+.ob-does { padding: 14px 18px 18px; border-top: 1px solid var(--line-2); }
+.ob-does-head { display: flex; align-items: center; gap: 8px; }
+.ob-does .small { margin: 4px 0 12px; }
 
 /* services */
 .ob-panel .card-body.rows { padding-top: 0; padding-bottom: 4px; }

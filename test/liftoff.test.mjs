@@ -68,7 +68,9 @@ test('init picks steps for the platforms and auto-ticks what exists', () => {
   const m = state.initProject(expo);
   assert.ok(m.steps.testflight && m.steps['play-testing'] && m.steps['store-checks']);
   assert.ok(!m.steps.hosting, 'mobile-only app has no web hosting step');
-  assert.ok(m.checklist['ios-delete']);
+  assert.ok(m.checklist['ios-age']);
+  assert.ok(m.steps.payments && m.checklist['ios-delete'], 'not built yet is not the same as not needed: kept until the owner says');
+  assert.ok(!m.steps.safety, 'no AI, uploads or posts in the code');
 });
 
 test('re-running init keeps progress', () => {
@@ -125,12 +127,12 @@ test('CLI: step, task, check, deploy and status', () => {
   const run = (...a) => execFileSync('node', [CLI, ...a, '--dir', expo], { env: process.env }).toString();
   run('step', 'testflight', 'done', '--provider', 'eas', '--force');
   run('task', 'add', 'Create app in App Store Connect', '--blocks');
-  run('check', 'ios-delete');
+  run('check', 'ios-age');
   run('deploy', '--target', 'testflight', '--platform', 'ios', '--version', '2.3 (41)');
   const s = JSON.parse(run('status', '--json'));
   assert.equal(s.steps.find((x) => x.id === 'testflight').status, 'done');
   assert.equal(s.tasks.filter((t) => !t.key && t.blocksRelease).length, 1);
-  assert.equal(s.checklist.find((c) => c.id === 'ios-delete').done, true);
+  assert.equal(s.checklist.find((c) => c.id === 'ios-age').done, true);
   assert.equal(s.deploys[0].version, '2.3 (41)');
   assert.match(run('status'), /Greenrow/);
 });

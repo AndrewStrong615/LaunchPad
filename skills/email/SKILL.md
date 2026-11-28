@@ -1,6 +1,6 @@
 ---
 name: email
-description: Send transactional email (welcome, receipts, password reset, failed payment) from the app's own domain via Resend, with SPF and DKIM so it lands in the inbox. Used by the email launch step.
+description: Send transactional email (welcome, receipts, password reset, failed payment) from the app's own domain via Resend (or the SendGrid or Postmark the app already uses), with SPF and DKIM so it lands in the inbox. Used by the email launch step.
 ---
 
 # Email
@@ -15,6 +15,11 @@ description: Send transactional email (welcome, receipts, password reset, failed
 4. Send from a real address (`hello@`), set `reply-to` to the support address from the landing page.
 5. Put `RESEND_API_KEY` in the host's server env vars only.
 
+SendGrid or Postmark already in the app: keep it, with the same templates and domain. SendGrid: authenticate the domain under Sender Authentication (`POST /v3/whitelabel/domains`); verify then asks SendGrid whether it validated the records. Postmark: add the domain as a sender signature and set its DKIM record; Postmark sends from its own return path, so only DKIM is needed. For any other provider, save the DKIM selector it gives with `liftoff set email.dkim <selector>` so verify can find the record.
+
 Check: `liftoff verify --only email-domain` passes once DNS is live (can take a few hours). Send each template to the user's address once.
 
 Record: `liftoff step email done --provider resend`; tick `email-flows` after the test sends arrive. If DNS is waiting on the user: `liftoff task add "Add the email DNS records for <domain>" --blocks`.
+
+## A service Liftoff doesn't list
+If the user added the provider themselves (Liftoff Cloud: `customServices` in `liftoff_plan`), keep the goals above and get the how from its docs: read them with `liftoff_docs` (start at the link the user gave; `/llms.txt` or an OpenAPI file are quicker when they exist), call its API with `liftoff_call`, and have the app read the key from the env var named `keyName`. Use its test or sandbox mode. `liftoff verify` can't check it: tick the items you tested yourself (they show as reported), and record the service's name as the provider.

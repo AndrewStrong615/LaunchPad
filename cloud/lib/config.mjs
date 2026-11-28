@@ -79,6 +79,9 @@ export function loadConfig(env = process.env) {
     maxSourceFiles: Number(env.LIFTOFF_MAX_SOURCE_FILES || 40000),
     // Only for tests and local development: lets verify and Pulse reach private addresses.
     allowPrivateFetch: env.LIFTOFF_ALLOW_PRIVATE_FETCH === '1' && !production,
+    // Ask each service whether a key works when it's connected (one read-only
+    // request). Tests turn it off so they never reach real services.
+    checkKeys: env.LIFTOFF_CHECK_KEYS !== '0',
     proof: { url: proofProblem ? null : proofUrl, secret: proofProblem || !proofUrl ? null : proofSecret, problem: proofProblem },
     // GitHub logins that can read the run records (lib/records.mjs).
     adminLogins: (env.LIFTOFF_ADMIN_LOGINS || '').split(',').map((l) => l.trim().toLowerCase()).filter(Boolean),

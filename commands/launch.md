@@ -21,9 +21,11 @@ Run `$LIFTOFF init` in the project root. Then read the code yourself (package.js
 
 Tell the user in two or three lines what you found, e.g. "Found **Basket**, a shared grocery list built with Expo for iOS, Android and Web. Pro unlocks unlimited lists."
 
+Then run `$LIFTOFF profile`. It lists what Liftoff thinks the app does (takes payments, signs people in, saves data on a server, sends email, uses AI models, takes uploads, shows what people post), and the plan, the paperwork and the checklist only cover what's on: a free app with no accounts gets no payment or sign-in steps, and an app with AI or user posts gets the extra checks it needs. Show the user the list and ask if it's right. Fix what they correct with `$LIFTOFF profile <feature> on|off` (for example `$LIFTOFF profile payments off` for a free app, or `on` for payments they want added), then `$LIFTOFF profile --confirm`. If they want something the app doesn't have yet (payments for a free app), turn it on so its steps join the plan.
+
 ## 2. Start the slow paperwork first
 
-`init` adds dated tasks for paperwork with long lead times (Apple Developer enrollment and Paid Apps Agreement, Google Play verification and the 14-day closed test, Stripe activation, the domain). Show them to the user **before** building, with how long each takes and the link, and ask them to start them now so they run in parallel with your work. Mark each one done when the user says it is.
+`init` adds dated tasks for paperwork with long lead times (Apple Developer enrollment, Google Play verification and the 14-day closed test, the domain, and for apps that take payments the Paid Apps Agreement, the Play payments profile and Stripe activation). The list follows the profile, so check that first. Show them to the user **before** building, with how long each takes and the link, and ask them to start them now so they run in parallel with your work. Mark each one done when the user says it is.
 
 ## 3. Check accounts once
 

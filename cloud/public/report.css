@@ -50,6 +50,7 @@ h1 { font-size: clamp(28px, 6vw, 38px); line-height: 1.15; letter-spacing: -.025
 .verdict .d { color: var(--muted); }
 .verdict.ok { background: var(--good-soft); border-color: transparent; color: var(--good); }
 .verdict.ok .v { color: var(--good); }
+.tailored { margin: 12px 2px 0; color: var(--muted); font-size: 14px; }
 
 .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 16px 0 8px; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); background: var(--line); }
 .facts > div { background: var(--surface); padding: 14px 16px; min-width: 0; }

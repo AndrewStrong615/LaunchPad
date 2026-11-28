@@ -4,14 +4,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { addTask, removeTask, setCheck, setConfig, setTaskDone, summarize, CONFIG_KEYS } from '../../lib/state.mjs';
+import { addTask, confirmProfile, removeTask, setCheck, setConfig, setFeature, setTaskDone, summarize, CONFIG_KEYS } from '../../lib/state.mjs';
+import { featuresOf } from '../../lib/profile.mjs';
 import { nextAction } from '../../lib/advice.mjs';
 import { costReport } from '../../lib/costs.mjs';
 import { ACCOUNTS, stepsFor } from '../../lib/catalog.mjs';
 import { ASSETS } from '../../lib/server.mjs';
 import { HttpError, cookie, parseCookies, readJson, readRaw, redirect, send } from './http.mjs';
 import { sign, unsign } from './crypto.mjs';
-import { connectUserAccount, disconnectUserAccount, listUserAccounts } from './accounts.mjs';
+import { cleanAccountValues, connectUserAccount, disconnectUserAccount, listUserAccounts } from './accounts.mjs';
+import { cleanCustomService, listCustomServices, removeCustomService, saveCustomService, testCustomKey } from './custom.mjs';
+import { checkKey } from './key-check.mjs';
 import { githubToken, importFromGitHub, importFromZip, rescan } from './importer.mjs';
 import { pulseApp, setLiveUrl, validateLiveUrl, validateSetting, verifyApp } from './tools.mjs';
 import { LIVE, publicRun } from './runs.mjs';
@@ -78,7 +81,7 @@ export function createApp(ctx) {
 
   // Everything the Flight Board shows for one app, plus what the cloud adds.
   function view(uid, state, accounts = accountsOf(uid)) {
-    const s = summarize(state, { accounts });
+    const s = summarize(state, { accounts, custom: listCustomServices(store, uid) });
     const all = runs.list(uid, state.slug);
     const latest = all[0] || null;
     const src = state.source || {};
@@ -297,11 +300,30 @@ export function createApp(ctx) {
 
     if (parts[0] === 'accounts') {
       if (M === 'GET' && parts.length === 1) return ok(accountsOf(uid));
+      // A service Liftoff doesn't list (custom.mjs): saved only once its
+      // details make sense and, when a test address is given, the key works.
+      if (parts[1] === 'custom' && parts.length === 2 && M === 'POST') {
+        limit(`acct:${uid}`, 30, 60000);
+        const svc = cleanCustomService(await readJson(req));
+        const check = config.checkKeys ? await testCustomKey(ctx, svc) : { ok: null, detail: 'Not checked yet.' };
+        if (check.ok === false) throw new HttpError(400, check.detail);
+        saveCustomService(store, uid, svc, check);
+        return ok(accountsOf(uid));
+      }
+      if (/^custom-/.test(parts[1] || '') && parts.length === 2 && M === 'DELETE') {
+        removeCustomService(store, uid, parts[1]);
+        return ok(accountsOf(uid));
+      }
       if (parts[1] && !ACCOUNTS[parts[1]]) throw new HttpError(404, 'No such account');
       if (M === 'POST' && parts.length === 2) {
         limit(`acct:${uid}`, 30, 60000);
         const body = await readJson(req);
-        connectUserAccount(store, uid, parts[1], body.values || {});
+        const values = cleanAccountValues(parts[1], body.values || {});
+        // One read-only request to the service. Only a clear "wrong key"
+        // turns it away; trouble reaching the service never does.
+        const check = config.checkKeys ? await checkKey(parts[1], values, ctx.safeFetch) : null;
+        if (check?.ok === false) throw new HttpError(400, check.detail);
+        connectUserAccount(store, uid, parts[1], values, 'you', check);
         return ok(accountsOf(uid));
       }
       if (M === 'DELETE' && parts.length === 2) {
@@ -412,6 +434,19 @@ export function createApp(ctx) {
         const body = await readJson(req);
         return save((s) => setCheck(s, rest[1], body.done !== false, 'you'));
       }
+      if (rest[0] === 'profile' && rest.length === 1 && M === 'POST') {
+        // What the app does (lib/profile.mjs): { feature, on: true | false | null }
+        // corrects one; { confirm: true } says it's right. Steps, paperwork and
+        // checks follow at once.
+        limit(`profile:${uid}`, 60, 60000);
+        const body = await readJson(req);
+        if (body.feature === undefined && body.confirm !== true) throw new HttpError(400, 'Send { feature, on } or { confirm: true }.');
+        if (body.feature !== undefined && body.on !== undefined && body.on !== null && typeof body.on !== 'boolean') throw new HttpError(400, 'on is true, false or null.');
+        return save((s) => {
+          if (body.feature !== undefined) setFeature(s, String(body.feature), body.on ?? null);
+          if (body.confirm === true) confirmProfile(s);
+        });
+      }
       if (rest[0] === 'settings' && M === 'POST') {
         const body = await readJson(req);
         const value = validateSetting(String(body.key || ''), body.value);
@@ -470,7 +505,7 @@ export function createApp(ctx) {
           return res.end(body);
         }
       }
-      if (rest[0] === 'steps' && M === 'GET') return ok(stepsFor(state.platforms).map((s) => ({ id: s.id, label: s.label, does: s.does })));
+      if (rest[0] === 'steps' && M === 'GET') return ok(stepsFor(state.platforms, featuresOf(state)).map((s) => ({ id: s.id, label: s.label, does: s.does })));
     }
     throw new HttpError(404, 'Not found');
   }

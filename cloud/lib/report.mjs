@@ -10,10 +10,11 @@
 // test needs.
 import fs from 'node:fs';
 import path from 'node:path';
-import { checklistFor } from '../../lib/catalog.mjs';
-import { sellsWithStripe, VERIFIABLE } from '../../lib/verify.mjs';
+import { checklistFor, usesOf } from '../../lib/catalog.mjs';
+import { FEATURES, describe, featuresOf, knownFeatures, profileView } from '../../lib/profile.mjs';
+import { canProve, sellsWithStripe } from '../../lib/verify.mjs';
 import { STEPS } from '../../proof/protocol.mjs';
-import { stripeConnected as hasStripe } from './accounts.mjs';
+import { stripeConnected as hasStripe, usesFor } from './accounts.mjs';
 import { DEFAULT_ASSISTANT } from './brand.mjs';
 import { HttpError } from './http.mjs';
 import { verifyApp } from './tools.mjs';
@@ -26,13 +27,35 @@ const SHOT = /^\d{2}-[a-z-]{1,20}\.jpg$/;
 const LABEL = Object.fromEntries(STEPS);
 
 // What must be proven for a certificate: the site is up on HTTPS with its
-// legal pages, ships no secret keys, and (when it sells through Stripe) the
-// webhook and the whole purchase flow work. Supabase apps also need RLS on.
-export function requiredChecks(state, { stripeConnected = false } = {}) {
+// legal pages, ships no secret keys, and (when it sells through Stripe,
+// Paddle or Polar) the webhook and the whole purchase flow work; Lemon
+// Squeezy's webhook too. Supabase and Firebase apps also need their data
+// locked down. A service Liftoff can't check (the user's own) adds nothing:
+// its items show as reported, never as proven. Only checks that fit what the
+// app does count (lib/profile.mjs): an app that takes no payments is
+// certified without a purchase test.
+export function requiredChecks(state, { stripeConnected = false, uses = usesOf(state) } = {}) {
   const ids = ['host-deploy', 'host-https', 'land-legal', 'sec-keys'];
-  if (sellsWithStripe(state, { stripeConnected })) ids.push('pay-webhook', 'pay-e2e');
-  if (state.integrations?.supabase) ids.push('sec-rls');
-  return ids;
+  const sells = (state.platforms || []).includes('web') && knownFeatures(state).payments;
+  if (sellsWithStripe(state, { stripeConnected, uses })) ids.push('pay-webhook', 'pay-e2e');
+  else if (sells && (uses.payments === 'paddle' || uses.payments === 'polar')) ids.push('pay-webhook', 'pay-e2e');
+  else if (sells && uses.payments === 'lemonsqueezy') ids.push('pay-webhook');
+  if (uses.database === 'supabase' || uses.database === 'firebase') ids.push('sec-rls');
+  const fit = new Set(checklistFor(state.platforms || [], featuresOf(state)).map((c) => c.id));
+  return ids.filter((id) => fit.has(id));
+}
+
+// What the report was tailored to, for the public page: what the app does,
+// what it doesn't, and anything the code has that the owner turned off.
+export function profileFacts(state) {
+  const p = profileView(state);
+  return {
+    size: p.size,
+    does: p.features.filter((f) => f.on).map((f) => f.id),
+    // Kept in though nothing in the code does it yet.
+    unsure: p.unsure,
+    overridden: p.overridden,
+  };
 }
 
 // Checks whose title alone points at a weakness when they haven't passed
@@ -43,20 +66,21 @@ const SENSITIVE = new Set(['sec-keys', 'sec-rls', 'sec-rate', 'sec-spend', 'sec-
 export const unnamedInPublic = (c) => SENSITIVE.has(c.id) && c.status !== 'proven' && c.status !== 'reported';
 
 const day = (iso) => (iso ? new Date(iso).toISOString().slice(0, 10) : null);
+const FEATURE = Object.fromEntries(FEATURES.map((f) => [f.id, f]));
 
-function statusOf(item, now) {
+function statusOf(item, now, provable) {
   if (item.verify?.ok === false) return 'failed';
   if (item.done && item.by === 'verified') return item.at && now - Date.parse(item.at) <= PROOF_MAX_AGE_DAYS * DAY ? 'proven' : 'stale';
   if (item.done) return 'reported';
-  return VERIFIABLE.includes(item.id) ? 'unproven' : 'open';
+  return provable ? 'unproven' : 'open';
 }
 
 // The report for an app as it stands. Pure: the caller runs verify first.
-export function assess(state, { now = Date.now(), stripeConnected = false } = {}) {
-  const required = new Set(requiredChecks(state, { stripeConnected }));
-  const checks = checklistFor(state.platforms || []).map((c) => {
+export function assess(state, { now = Date.now(), stripeConnected = false, uses = usesOf(state) } = {}) {
+  const required = new Set(requiredChecks(state, { stripeConnected, uses }));
+  const checks = checklistFor(state.platforms || [], featuresOf(state)).map((c) => {
     const cur = state.checklist?.[c.id] || { done: false };
-    const status = statusOf({ id: c.id, ...cur }, now);
+    const status = statusOf({ id: c.id, ...cur }, now, canProve(state, c.id, { uses, stripeConnected }));
     const ticked = status === 'proven' || status === 'stale' || status === 'reported';
     return {
       id: c.id,
@@ -95,7 +119,7 @@ const reportsDir = (ctx, uid, slug) => path.join(ctx.store.appDir(uid, slug), 'r
 export async function createReport(ctx, uid, slug) {
   const { state } = await verifyApp(ctx, uid, slug);
   const now = Date.now();
-  const a = assess(state, { now, stripeConnected: hasStripe(ctx.store, uid) });
+  const a = assess(state, { now, stripeConnected: hasStripe(ctx.store, uid), uses: usesFor(ctx.store, uid, state) });
   const id = ctx.store.newPublicId('rp');
   const dir = path.join(reportsDir(ctx, uid, slug), id);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -126,7 +150,7 @@ export async function createReport(ctx, uid, slug) {
   const report = {
     id,
     createdAt: new Date(now).toISOString(),
-    app: { name: state.name, framework: state.framework, platforms: state.platforms, liveUrl: state.liveUrl || null },
+    app: { name: state.name, framework: state.framework, platforms: state.platforms, liveUrl: state.liveUrl || null, profile: profileFacts(state) },
     certified: a.certified,
     missing: a.missing,
     score: a.score,
@@ -216,7 +240,7 @@ export function countClick(ctx, uid, slug) {
 
 // What the Flight Board shows.
 export function reportView(ctx, uid, state) {
-  const a = assess(state, { stripeConnected: hasStripe(ctx.store, uid) });
+  const a = assess(state, { stripeConnected: hasStripe(ctx.store, uid), uses: usesFor(ctx.store, uid, state) });
   const base = ctx.config.publicUrl;
   const badgeId = state.report?.badgeId || null;
   const history = (state.report?.history || []).map((r) => ({ ...r, url: `${base}/r/${r.id}` }));
@@ -282,6 +306,26 @@ export function renderReport(report, { home = '/', assistant = DEFAULT_ASSISTANT
 
   const purchase = r.purchase ? `<section><h2>Purchase test</h2><p class="intro">Liftoff's own browser bought, cancelled and re-checked a subscription on ${esc(longDate(r.purchase.at))}${r.purchase.checkout ? ` (Stripe test checkout ${esc(r.purchase.checkout)})` : ''}. Stripe's records confirmed it.</p><ol class="steps">${r.purchase.steps.map((s) => `<li class="${s.ok ? 'ok' : 'bad'}">${s.ok ? TICK : CROSS}<div><div class="t">${esc(s.label)}</div><div class="d">${esc(s.detail)}</div></div>${s.shot ? `<a class="shot" href="${esc(`/r/${r.id}/${s.shot}`)}"><img src="${esc(`/r/${r.id}/${s.shot}`)}" alt="${esc(`Screenshot: ${s.label}`)}" loading="lazy"></a>` : ''}</li>`).join('')}</ol></section>` : '';
 
+  // What the checks were tailored to. Reports from before this have no profile.
+  const prof = r.app.profile;
+  let tailored = '';
+  if (prof && Array.isArray(prof.does)) {
+    const pick = (ids) => Object.fromEntries((ids || []).filter((id) => FEATURE[id]).map((id) => [id, true]));
+    const on = pick(prof.does);
+    const kept = pick(prof.unsure);
+    const yes = describe(Object.fromEntries(Object.keys(on).filter((id) => !kept[id]).map((id) => [id, true])));
+    // What it doesn't do, for the parts that change a launch most.
+    const no = describe({ ...on, email: true, ai: true, uploads: true, community: true }, { negative: true });
+    const name = esc(r.app.name);
+    const checked = yes ? `It checked ${name} as an app that ${esc(yes)}${no ? ` (it ${esc(no)})` : ''}.`
+      : !Object.keys(kept).length ? `It checked ${name} as a simple app${no ? ` (it ${esc(no)})` : ''}.`
+      : no ? `It checked ${name} as an app that ${esc(no)}.` : '';
+    // Not built yet isn't the same as not needed, so those checks still count.
+    const stays = Object.keys(kept).length ? ` Nothing in its code ${esc(describe(kept, { or: true }))} yet, so those checks stay in until the team says the app won't need them.` : '';
+    const owner = (prof.overridden || []).filter((id) => FEATURE[id]);
+    const said = owner.length ? ` The team says it ${owner.map((id) => FEATURE[id].doesnt).join(' and ')}, though its code suggests otherwise, so those checks weren't required.` : '';
+    tailored = `<p class="tailored">Liftoff tailors its checks to what an app does.${checked ? ` ${checked}` : ''}${stays}${esc(said)}</p>`;
+  }
   const live = r.app.liveUrl && /^https?:\/\//.test(r.app.liveUrl) ? `<a href="${esc(r.app.liveUrl)}" rel="nofollow noopener">${esc(r.app.liveUrl.replace(/^https?:\/\//, '').replace(/\/$/, ''))}</a>` : '';
   const verdict = r.certified
     ? `<div class="verdict ok">${TICK}<div><div class="v">Launch certified</div><div class="d">Every required check ran on Liftoff's server and passed.</div></div></div>`
@@ -293,6 +337,7 @@ export function renderReport(report, { home = '/', assistant = DEFAULT_ASSISTANT
 <header class="top"><a class="brand" href="${esc(home)}">Liftoff</a><span>Launch report</span></header>
 <h1>${esc(r.app.name)}</h1><p class="meta">${[esc(r.app.framework), esc((r.app.platforms || []).join(', ')), live].filter(Boolean).join(' · ')}</p>
 ${verdict}
+${tailored}
 <div class="facts"><div><div class="k">Checked</div><div class="v">${esc(longDate(r.createdAt))}</div></div><div><div class="k">Launch score</div><div class="v">${esc(r.score)}<span>/100</span></div></div><div><div class="k">Proven by Liftoff</div><div class="v">${esc(r.counts.proven)}<span> of ${esc(r.counts.total)}</span></div></div></div>
 ${section('Proven by Liftoff', "Each of these was checked from Liftoff's own server against the live services, not ticked by hand.", proven)}
 ${purchase}
@@ -300,7 +345,7 @@ ${section("Didn't pass", null, failed)}
 ${section('Not proven yet', null, unproven, { count: unproven.length - (unnamed ? 1 : 0) + unnamed })}
 ${section('Reported, not proven', `Done according to the team or ${assistant}. Liftoff counts these as half in the score and never certifies on them.`, reported)}
 ${section('Still open', 'Steps no one has marked done yet.', open, { folded: true })}
-<footer><p>Liftoff certifies a launch only when every required check (the site is live on HTTPS with privacy and terms pages, no secret keys ship in the code, and for apps that sell through Stripe, a webhook and a full test purchase) ran on its server and passed in the ${PROOF_MAX_AGE_DAYS} days before the report. Other checks are shown as they stood and count toward the score. This page is a snapshot from ${esc(longDate(r.createdAt))}.</p>
+<footer><p>Liftoff certifies a launch only when every required check (the site is live on HTTPS with privacy and terms pages, no secret keys ship in the code, and for apps that sell through Stripe, a webhook and a full test purchase) ran on its server and passed in the ${PROOF_MAX_AGE_DAYS} days before the report. Other checks are shown as they stood and count toward the score. Checks that don't fit what the app does are left out. This page is a snapshot from ${esc(longDate(r.createdAt))}.</p>
 <p><a class="cta" href="${esc(home)}">Launch your app with Liftoff</a></p></footer>
 </main></body></html>`;
 }

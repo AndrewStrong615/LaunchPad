@@ -5,12 +5,15 @@
 // assistant by its Liftoff name, the run's mode and tokens (lib/brand.mjs).
 import crypto from 'node:crypto';
 import { STEPS, stepsFor } from '../../lib/catalog.mjs';
+import { confirmProfile } from '../../lib/state.mjs';
+import { featuresOf } from '../../lib/profile.mjs';
 import { DEFAULT_MODEL, EFFORT, MODELS, kickoff, modelFor, tierOf } from './agent.mjs';
 import { DEFAULT_TOKENS_PER_USD, fromTokens, toTokens, tokenWord } from './brand.mjs';
 import { sandboxEnvPlan, syncVault } from './accounts.mjs';
 import { githubToken } from './importer.mjs';
 import { zipDirectory } from './archive.mjs';
 import { describeTool, NEEDS_APPROVAL, runTool } from './tools.mjs';
+import { listCustomServices } from './custom.mjs';
 import { randomId } from './crypto.mjs';
 import { HttpError } from './http.mjs';
 
@@ -137,11 +140,11 @@ export class RunManager {
     const state = store.loadApp(uid, slug);
     if (!state) throw new HttpError(404, 'No such app');
 
-    const valid = new Set(stepsFor(state.platforms).map((s) => s.id));
+    const fit = stepsFor(state.platforms, featuresOf(state)).map((s) => s.id);
     const picked = [...new Set((Array.isArray(steps) ? steps : []).map(String))];
-    const unknown = picked.filter((s) => !valid.has(s));
+    const unknown = picked.filter((s) => !fit.includes(s));
     if (unknown.length) throw new HttpError(400, `These steps don't apply to this app: ${unknown.join(', ')}`);
-    const ordered = stepsFor(state.platforms).map((s) => s.id).filter((id) => picked.includes(id));
+    const ordered = fit.filter((id) => picked.includes(id));
 
     const mine = store.allRuns((r) => r.uid === uid && LIVE.has(r.status));
     const open = store.listRuns(uid, slug).find((r) => OPEN.has(r.status));
@@ -172,7 +175,11 @@ export class RunManager {
     this.ctx.records?.begin(run, state);
     this.push(run, { kind: 'status', text: ordered.length ? `Starting a run for ${ordered.map((id) => STEPS.find((s) => s.id === id)?.label || id).join(', ')}` : 'Starting a run for every step that is left' });
     this.save(run);
-    store.updateApp(uid, slug, (s) => s.log.push({ at: run.createdAt, msg: `Started a cloud run (${ordered.length ? ordered.join(', ') : 'all remaining steps'})` }));
+    store.updateApp(uid, slug, (s) => {
+      // Starting a run on the steps shown means the plan, and what the app does, looks right.
+      if (!s.profile?.confirmedAt) confirmProfile(s);
+      s.log.push({ at: run.createdAt, msg: `Started a cloud run (${ordered.length ? ordered.join(', ') : 'all remaining steps'})` });
+    });
 
     // The slow part (vault, upload, session) happens after the response.
     this.launch(run, state, token).catch((e) => this.fail(run, e));
@@ -199,7 +206,7 @@ export class RunManager {
       run.uploadFileId = file.id;
       resources.push({ type: 'file', file_id: file.id, mount_path: '/app.zip' });
     }
-    const text = kickoff({ state, steps: run.steps, mode: run.mode, branch: run.branch, envPlan: sandboxEnvPlan(store, run.uid), note: run.note });
+    const text = kickoff({ state, steps: run.steps, mode: run.mode, branch: run.branch, envPlan: sandboxEnvPlan(store, run.uid), note: run.note, custom: listCustomServices(store, run.uid) });
     const session = await client.beta.sessions.create({
       // The agent's prompt and tools, on the model picked for this run.
       agent: { type: 'agent_with_overrides', id: config.anthropic.agentId, model: { id: run.model || DEFAULT_MODEL, effort: EFFORT } },
@@ -469,8 +476,10 @@ export class RunManager {
       run.status = 'needs-you';
       return;
     }
-    if (NEEDS_APPROVAL[ev.name]) {
-      const text = NEEDS_APPROVAL[ev.name](this.ctx, run, ev.input || {});
+    // A tool that waits on the user (github_set_secret, or a DELETE to one of
+    // the user's own services): its describer returns what to ask, or null.
+    const text = NEEDS_APPROVAL[ev.name]?.(this.ctx, run, ev.input || {});
+    if (text) {
       this.push(run, { id: ev.id, at, kind: 'liftoff', tool: ev.name, text: describeTool(ev.name, ev.input) });
       if (!run.pending.some((p) => p.id === ev.id)) run.pending.push({ id: ev.id, kind: 'secret', tool: ev.name, input: ev.input, text, at });
       run.status = 'needs-you';

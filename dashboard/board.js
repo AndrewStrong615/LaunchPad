@@ -358,13 +358,34 @@ function activity(entries, limit, showApp) {
 }
 
 // ---------- accounts ----------
-function accountRows(accounts) {
-  return h('div', { class: 'rows' }, accounts.filter(Boolean).map((a) => h('div', { class: 'line' },
+// What each service is for, in the order the Accounts page lists them.
+const ACCOUNT_GROUPS = [
+  ['payments', 'Payments'], ['auth', 'Sign-in'], ['database', 'Database'], ['hosting', 'Hosting'], ['email', 'Email'],
+  ['analytics', 'Analytics'], ['crashes', 'Crash tracking'], ['builds', 'Code and builds'], ['stores', 'App stores'], ['other', 'Other'],
+];
+const MODE_WORD = { test: 'Test mode', sandbox: 'Sandbox', live: 'Live' };
+// Under a service's name: what it's for, or when it was connected, which
+// mode its key is in, and whether the service has turned the key down.
+function accountSub(a) {
+  if (!a.connected || a.custom) return h('div', { class: 'small' }, a.note);
+  return h('div', { class: 'small acct-sub' },
+    h('span', {}, `Connected ${a.connectedAt ? ago(a.connectedAt) : ''}`.trim()),
+    a.mode ? h('span', { class: 'pill sm' + (a.mode === 'live' ? ' warn' : '') }, MODE_WORD[a.mode] || a.mode) : null,
+    a.check?.ok === false ? h('span', { class: 'pill sm bad', title: a.check.detail }, 'Key turned down') : null);
+}
+function accountRows(accounts, { grouped = false } = {}) {
+  const row = (a) => h('div', { class: 'line', key: a.id },
     serviceTile(a),
-    h('div', { class: 'grow' }, h('div', { class: 'name' }, a.label), h('div', { class: 'small' }, a.connected ? `Connected ${a.connectedAt ? ago(a.connectedAt) : ''}`.trim() : a.note)),
+    h('div', { class: 'grow' }, h('div', { class: 'name' }, a.label), accountSub(a)),
     hook('accountAction', a) || (a.connected
       ? h('span', { class: 'pill good' }, icon('check'), 'Connected')
-      : h('button', { class: 'btn', title: 'Copy the command that connects it', onclick: () => copy(`liftoff accounts connect ${a.id}`) }, icon('copy'), 'Connect')))));
+      : h('button', { class: 'btn', title: 'Copy the command that connects it', onclick: () => copy(`liftoff accounts connect ${a.id}`) }, icon('copy'), 'Connect')));
+  const list = accounts.filter(Boolean);
+  if (!grouped || !list.some((a) => a.category)) return h('div', { class: 'rows' }, list.map(row));
+  return h('div', { class: 'rows' }, ACCOUNT_GROUPS.map(([id, label]) => {
+    const mine = list.filter((a) => (a.category || 'other') === id);
+    return mine.length ? [h('div', { class: 'group-head', key: `g-${id}` }, label), mine.map(row)] : null;
+  }));
 }
 
 function renderAccounts() {
@@ -378,10 +399,12 @@ function renderAccounts() {
       h('section', { class: 'card' },
         h('div', { class: 'card-head' }, h('h2', {}, 'Not connected'), h('span', { class: 'count' }, rest.length),
           h('span', { class: 'end sub' }, HOOKS.accountAction ? 'Keys are stored encrypted' : 'Connect copies the command')),
-        h('div', { class: 'card-body' }, rest.length ? accountRows(rest) : h('div', { class: 'empty-row' }, icon('checkCircle'), 'Everything is connected.'))),
-      h('section', { class: 'card' },
-        h('div', { class: 'card-head' }, h('h2', {}, 'Connected'), h('span', { class: 'count' }, connected.length)),
-        h('div', { class: 'card-body' }, connected.length ? accountRows(connected) : h('div', { class: 'empty-row' }, 'None yet.')))),
+        h('div', { class: 'card-body' }, rest.length ? accountRows(rest, { grouped: true }) : h('div', { class: 'empty-row' }, icon('checkCircle'), 'Everything is connected.'))),
+      h('div', { class: 'stack' },
+        h('section', { class: 'card' },
+          h('div', { class: 'card-head' }, h('h2', {}, 'Connected'), h('span', { class: 'count' }, connected.length)),
+          h('div', { class: 'card-body' }, connected.length ? accountRows(connected) : h('div', { class: 'empty-row' }, 'None yet.'))),
+        hook('accountsMore'))),
   ];
 }
 
@@ -427,7 +450,8 @@ function pulseCard(app) {
 }
 function nextCard(app) {
   const a = app.nextAction;
-  if (!a) return null;
+  // "Check what the app does" is the profile card itself, just above.
+  if (!a || (a.profile && app.profile)) return null;
   const cmd = a.command && a.command.startsWith('/') ? a.command : null;
   return h('section', { class: 'card next' },
     h('span', { class: 'tile' }, icon('flag')),
@@ -459,6 +483,124 @@ function taskRow(app, t, showApp) {
       t.done ? h('button', { class: 'btn quiet icon-only', title: 'Remove', 'aria-label': 'Remove task', onclick: () => mutate(url, 'DELETE') }, icon('trash')) : null));
 }
 
+// ---------- what the app does ----------
+// Liftoff's read of what the app does (payments, sign-in, …). The launch
+// steps, "Needs you" and the readiness checks follow it, so the owner fixes
+// what the scan got wrong here. Until they confirm it, it shows in full at
+// the top; after, as one line above the steps that opens again.
+function featureNote(f) {
+  if (f.source === 'you') return f.inCode && !f.on ? `Set by you (${f.inCode})` : 'Set by you';
+  if (f.source === 'unsure') return 'Not in the code yet. Kept in case the app needs it';
+  if (f.on) return f.why || 'Found in the code';
+  return f.hint;
+}
+
+// How a change moved the launch: "2 fewer launch steps, 9 fewer checks".
+function changeWords(before, after) {
+  const d = (n, one, many) => (n === 0 ? null : `${Math.abs(n)} ${n > 0 ? 'more' : 'fewer'} ${Math.abs(n) === 1 ? one : many}`);
+  return [d(after.stepsTotal - before.stepsTotal, 'launch step', 'launch steps'), d(after.checksTotal - before.checksTotal, 'check', 'checks'), d(after.openTasks - before.openTasks, 'to-do', 'to-dos')].filter(Boolean).join(', ');
+}
+
+async function toggleFeature(app, f, btn) {
+  const before = { stepsTotal: app.stepsTotal, checksTotal: app.checksTotal, openTasks: app.openTasks };
+  btn.disabled = true;
+  try {
+    await api(`/api/apps/${encodeURIComponent(app.slug)}/profile`, { method: 'POST', body: JSON.stringify({ feature: f.id, on: !f.on }) });
+    await refresh(true);
+    const now = state.apps.find((a) => a.slug === app.slug);
+    const moved = now ? changeWords(before, now) : '';
+    toast(`${f.label}: ${f.on ? 'no' : 'yes'}.${moved ? ` ${moved[0].toUpperCase()}${moved.slice(1)}.` : ''}`);
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function featureSwitches(app) {
+  return h('div', { class: 'feats' }, app.profile.features.map((f) => h('button', {
+    class: 'feat' + (f.on ? ' on' : ''), type: 'button', role: 'switch', 'aria-checked': String(!!f.on), key: f.id,
+    onclick: (e) => toggleFeature(app, f, e.currentTarget),
+  },
+  h('span', { class: 'sw', 'aria-hidden': 'true' }),
+  h('span', { class: 'ft' }, h('b', {}, f.label), h('span', { class: 'small' }, featureNote(f))))));
+}
+
+// Steps this app's platforms have that don't fit what it does, kept in
+// sight under the launch steps. Add turns on what the step is for; a step
+// for several things opens the switches instead.
+function openProfile(app) {
+  state.open[`profile:${app.slug}`] = true;
+  render();
+  document.querySelector('.does')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function leftOutSteps(app) {
+  const list = app.leftOut || [];
+  if (!list.length || !app.profile) return null;
+  const add = (s, btn) => {
+    const f = s.features.length === 1 && app.profile.features.find((x) => x.id === s.features[0]);
+    if (f && !f.on) toggleFeature(app, f, btn);
+    else openProfile(app);
+  };
+  return h('div', { class: 'left-out' },
+    h('div', { class: 'lo-head' },
+      h('b', {}, 'Not part of this launch'), h('span', { class: 'count' }, list.length),
+      h('span', { class: 'small' }, 'Turned off for this app, or not called for by its code. Add any it will need.')),
+    h('div', { class: 'roadmap lo' }, list.map((s) => h('div', { class: 'step left', key: s.id },
+      h('div', { class: 'lo-top' },
+        h('div', { class: 'lbl' }, icon('minus'), h('span', {}, s.label)),
+        h('button', { class: 'btn quiet sm', type: 'button', 'aria-label': `Add ${s.label}`, onclick: (e) => add(s, e.currentTarget) }, icon('plus'), 'Add')),
+      h('div', { class: 'note' }, s.for ? `Only if it ${s.for}` : 'Doesn’t fit this app')))));
+}
+
+// "16 checks left out (Payments 8, Sign-in 3, …)"
+function leftOutChecks(app) {
+  const list = app.checksLeftOut || [];
+  const n = list.reduce((t, c) => t + c.count, 0);
+  if (!n || !app.profile) return null;
+  return h('div', { class: 'lo-checks small' },
+    h('span', {}, `${plural(n, 'check')} left out as not needed: ${list.map((c) => `${c.category} ${c.count}`).join(', ')}.`),
+    h('button', { class: 'linkish', type: 'button', onclick: () => openProfile(app) }, 'Change what this app does'));
+}
+
+function confirmProfile(app, btn) {
+  btn.disabled = true;
+  delete state.open[`profile:${app.slug}`];
+  mutate(`/api/apps/${encodeURIComponent(app.slug)}/profile`, 'POST', { confirm: true });
+}
+
+function profileCard(app) {
+  const p = app.profile;
+  if (!p) return null;
+  const key = `profile:${app.slug}`;
+  const asking = !p.confirmedAt;
+  const open = asking || !!state.open[key];
+  const counts = `${plural(app.stepsTotal, 'launch step')} · ${plural(app.checksTotal, 'check')} · ${plural(app.openTasks, 'to-do')} for you`;
+  if (!open) {
+    const on = p.features.filter((f) => f.on);
+    return h('section', { class: 'card does slim', key: 'profile' },
+      icon('layers'),
+      h('span', { class: 'k' }, 'Tailored to'),
+      h('div', { class: 'tags' }, on.length ? on.map((f) => h('span', { class: 'tag', key: f.id }, f.label)) : h('span', { class: 'tag' }, 'No payments, sign-in or server data')),
+      h('span', { class: 'pill sm' }, p.sizeLabel),
+      h('button', { class: 'btn quiet sm', type: 'button', 'aria-expanded': 'false', onclick: () => { state.open[key] = true; render(); } }, 'Change'));
+  }
+  return h('section', { class: 'card does' + (asking ? ' ask' : ''), key: 'profile' },
+    h('div', { class: 'card-head' }, icon('layers'), h('h2', {}, `What ${app.name} does`), h('span', { class: 'pill sm' }, p.sizeLabel),
+      h('span', { class: 'end sub' }, asking ? 'Liftoff’s guess from the code' : 'Confirmed by you')),
+    h('div', { class: 'card-body' },
+      h('p', { class: 'small lead' }, asking
+        ? 'The launch steps, what needs you and the readiness checks follow from this. Anything not built yet stays in, in case the app needs it. Turn off what it won’t.'
+        : 'Change this whenever the app changes. The steps and checks follow at once, and nothing you’ve done is lost.'),
+      featureSwitches(app),
+      h('div', { class: 'does-foot' },
+        h('span', { class: 'small grow' }, counts),
+        asking
+          ? h('button', { class: 'btn primary', type: 'button', onclick: (e) => confirmProfile(app, e.currentTarget) }, icon('check'), 'Looks right')
+          : h('button', { class: 'btn', type: 'button', onclick: () => { delete state.open[key]; render(); } }, 'Done'))));
+}
+
 const STEP_ICON = { done: 'checkCircle', skipped: 'minus', running: 'spinner', blocked: 'x', todo: 'circle' };
 const STEP_WORD = { done: 'Done', skipped: 'Skipped', running: 'In progress', blocked: 'Blocked', todo: 'Not started' };
 
@@ -488,8 +630,10 @@ function renderApp(app) {
         h('div', { class: 'fact' }, h('div', { class: 'label' }, 'Readiness checks'), h('div', { class: 'value' }, app.checksDone, h('small', {}, ` / ${app.checksTotal}`))),
         h('div', { class: 'fact' }, h('div', { class: 'label' }, 'Blocking release'), h('div', { class: 'value' + (app.blockingTasks ? ' bad' : '') }, app.blockingTasks)))),
 
+    app.profile && !app.profile.confirmedAt ? profileCard(app) : null,
     hook('afterHero', app),
     nextCard(app),
+    app.profile?.confirmedAt ? profileCard(app) : null,
 
     h('section', { class: 'card' },
       h('div', { class: 'card-head' }, h('h2', {}, 'Launch steps'), h('span', { class: 'count' }, `${app.stepsDone}/${app.stepsTotal}`),
@@ -501,7 +645,8 @@ function renderApp(app) {
           h('div', { class: 'note' }, s.stale ? 'Stalled: run it again'
             : st === 'todo' && s.waitingOn?.length ? `Waits on ${s.waitingOn.map((id) => app.steps.find((x) => x.id === id)?.label || id).join(', ')}`
             : s.note || (s.provider ? `${STEP_WORD[st]} · ${s.provider}` : STEP_WORD[st])));
-      }))),
+      })),
+      leftOutSteps(app)),
 
     h('div', { class: 'cols' },
       h('div', { class: 'stack' },
@@ -535,7 +680,8 @@ function renderApp(app) {
                 h('input', { type: 'checkbox', checked: c.done, onchange: (e) => mutate(`/api/apps/${app.slug}/checklist/${c.id}`, 'POST', { done: e.target.checked }) }),
                 h('span', { class: 'tx' }, c.title, c.verify?.ok === false ? h('span', { class: 'why' }, c.verify.detail) : null),
                 c.done && c.by ? h('span', { class: 'by' }, c.by === 'verified' ? 'verified' : `by ${hook('whoTicked', c.by) || c.by}`) : null))));
-          })),
+          }),
+          leftOutChecks(app)),
         hook('mainBottom', app)),
 
       h('div', { class: 'stack' },
@@ -706,5 +852,5 @@ function start() {
   setTimeout(tick, hook('pollMs') || 4000);
 }
 
-window.Board = { configure, start, state, h, icon, logo, serviceTile, api, mutate, go, render, refresh, toast, copy, ago, colorFor, avatar, host, plural, money, morph, repaint, setTheme, themeButton, PLATFORM, STEP_WORD, ICONS };
+window.Board = { configure, start, state, h, icon, logo, serviceTile, api, mutate, go, render, refresh, toast, copy, ago, colorFor, avatar, host, plural, money, morph, repaint, setTheme, themeButton, featureSwitches, PLATFORM, STEP_WORD, ICONS };
 if (!document.body.hasAttribute('data-board-manual')) start();
