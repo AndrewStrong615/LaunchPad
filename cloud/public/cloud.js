@@ -461,9 +461,18 @@
             const item = app.checklist.find((c) => c.id === f.id);
             return h('li', { key: f.id }, icon('x'), h('div', {}, h('b', {}, item ? item.title : f.id), f.detail ? h('div', { class: 'small' }, f.detail) : null));
           }), failing.length > 3 ? h('li', { class: 'more small', key: 'more' }, `and ${failing.length - 3} more`) : null)
-          : h('div', { class: 'empty-row' }, icon('checkCircle'), 'Nothing in the code needs fixing first.')),
+          : h('div', { class: 'empty-row' }, icon('checkCircle'), 'Nothing in the code needs fixing first.'),
+        // What the app does: the steps, to-dos and checks above follow it.
+        app.profile ? h('div', { class: 'ob-does' },
+          h('div', { class: 'ob-does-head' }, h('b', {}, `What ${app.name} does`), h('span', { class: 'pill sm' }, app.profile.sizeLabel)),
+          h('p', { class: 'small' }, 'Liftoff guessed this from the code, and picked the launch steps and checks to fit. Fix anything that’s wrong.'),
+          Board.featureSwitches(app)) : null),
       obActs(
-        obNext('Continue', () => obGo(2)),
+        obNext('Continue', () => {
+          // Going on from here means what the app does looks right.
+          if (app.profile && !app.profile.confirmedAt) post(`/api/apps/${encodeURIComponent(app.slug)}/profile`, { confirm: true }).catch(() => {});
+          obGo(2);
+        }),
         h('button', { class: 'btn quiet big', type: 'button', onclick: () => { C.ob.slug = null; obSave(); render(); } }, 'Use a different app')),
     ];
   }

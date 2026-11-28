@@ -107,8 +107,10 @@ test('slow paperwork lands on the task list on day one with lead times', () => {
   assert.equal(paid.blocksRelease, true);
   assert.match(paid.leadTime, /days/);
   assert.ok(state.loadState(web).tasks.some((t) => t.key === 'stripe-activate'));
-  // First advice is to start it, before any build step.
-  const a = nextAction(state.summarize(m));
+  // First advice is to check what the app does (the paperwork follows from
+  // it), then to start the paperwork, before any build step.
+  assert.equal(nextAction(state.summarize(m)).title, 'Check what Greenrow does');
+  const a = nextAction(state.summarize(state.confirmProfile(m)));
   assert.equal(a.title, 'Start the slow paperwork now');
 });
 
@@ -240,8 +242,10 @@ test('verify proves the purchase flow from Stripe: paid, cancelled, webhook took
 
 test('the purchase flow is server-proven only for web apps that pay through Stripe', async () => {
   const { purchaseProvenByStripe, sameApp } = await import('../lib/verify.mjs');
-  assert.equal(purchaseProvenByStripe({ platforms: ['web'], steps: {} }, { stripeConnected: true }), true);
-  assert.equal(purchaseProvenByStripe({ platforms: ['web'], steps: {} }, { stripeConnected: false }), false);
+  const selling = { set: { payments: true } };
+  assert.equal(purchaseProvenByStripe({ platforms: ['web'], steps: {}, profile: selling }, { stripeConnected: true }), true);
+  assert.equal(purchaseProvenByStripe({ platforms: ['web'], steps: {}, profile: selling }, { stripeConnected: false }), false);
+  assert.equal(purchaseProvenByStripe({ platforms: ['web'], steps: {} }, { stripeConnected: true }), false, 'Stripe is connected, but this app takes no payments');
   assert.equal(purchaseProvenByStripe({ platforms: ['web'], steps: { payments: { provider: 'paddle' } } }, { stripeConnected: true }), false);
   assert.equal(purchaseProvenByStripe({ platforms: ['ios', 'android'], steps: { payments: { provider: 'stripe' } } }, { stripeConnected: true }), false);
   assert.equal(sameApp('3fa9c1.ledger.pages.dev', 'ledger.pages.dev'), true);

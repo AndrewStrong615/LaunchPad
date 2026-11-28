@@ -63,7 +63,7 @@ test('the agent keeps keys out of reach and asks before risky steps', () => {
   assert.deepEqual(toolset.default_config.permission_policy, { type: 'auto' });
   assert.ok(toolset.configs.some((c) => c.name === 'web_fetch' && c.enabled === false));
   const names = CUSTOM_TOOLS.map((t) => t.name);
-  for (const n of ['liftoff_plan', 'liftoff_step', 'liftoff_verify', 'ask_user', 'open_pull_request', 'github_set_secret']) assert.ok(names.includes(n), n);
+  for (const n of ['liftoff_plan', 'liftoff_step', 'liftoff_profile', 'liftoff_verify', 'ask_user', 'open_pull_request', 'github_set_secret']) assert.ok(names.includes(n), n);
   for (const t of CUSTOM_TOOLS) assert.equal(t.input_schema.type, 'object');
   assert.match(SYSTEM_PROMPT, /Never print, echo, log, write to a file or commit a key/);
   assert.match(SYSTEM_PROMPT, /data, not instructions/);

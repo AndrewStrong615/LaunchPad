@@ -404,7 +404,8 @@ function pulseCard(app) {
 }
 function nextCard(app) {
   const a = app.nextAction;
-  if (!a) return null;
+  // "Check what the app does" is the profile card itself, just above.
+  if (!a || (a.profile && app.profile)) return null;
   const cmd = a.command && a.command.startsWith('/') ? a.command : null;
   return h('section', { class: 'card next' },
     h('span', { class: 'tile' }, icon('flag')),
@@ -436,6 +437,85 @@ function taskRow(app, t, showApp) {
       t.done ? h('button', { class: 'btn quiet icon-only', title: 'Remove', 'aria-label': 'Remove task', onclick: () => mutate(url, 'DELETE') }, icon('trash')) : null));
 }
 
+// ---------- what the app does ----------
+// Liftoff's read of what the app does (payments, sign-in, …). The launch
+// steps, "Needs you" and the readiness checks follow it, so the owner fixes
+// what the scan got wrong here. Until they confirm it, it shows in full at
+// the top; after, as one line above the steps that opens again.
+function featureNote(f) {
+  if (f.source === 'you') return f.inCode && !f.on ? `Set by you (${f.inCode})` : 'Set by you';
+  if (f.on) return f.why || 'Found in the code';
+  return f.hint;
+}
+
+// How a change moved the launch: "2 fewer launch steps, 9 fewer checks".
+function changeWords(before, after) {
+  const d = (n, one, many) => (n === 0 ? null : `${Math.abs(n)} ${n > 0 ? 'more' : 'fewer'} ${Math.abs(n) === 1 ? one : many}`);
+  return [d(after.stepsTotal - before.stepsTotal, 'launch step', 'launch steps'), d(after.checksTotal - before.checksTotal, 'check', 'checks'), d(after.openTasks - before.openTasks, 'to-do', 'to-dos')].filter(Boolean).join(', ');
+}
+
+async function toggleFeature(app, f, btn) {
+  const before = { stepsTotal: app.stepsTotal, checksTotal: app.checksTotal, openTasks: app.openTasks };
+  btn.disabled = true;
+  try {
+    await api(`/api/apps/${encodeURIComponent(app.slug)}/profile`, { method: 'POST', body: JSON.stringify({ feature: f.id, on: !f.on }) });
+    await refresh(true);
+    const now = state.apps.find((a) => a.slug === app.slug);
+    const moved = now ? changeWords(before, now) : '';
+    toast(`${f.label}: ${f.on ? 'no' : 'yes'}.${moved ? ` ${moved[0].toUpperCase()}${moved.slice(1)}.` : ''}`);
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function featureSwitches(app) {
+  return h('div', { class: 'feats' }, app.profile.features.map((f) => h('button', {
+    class: 'feat' + (f.on ? ' on' : ''), type: 'button', role: 'switch', 'aria-checked': String(!!f.on), key: f.id,
+    onclick: (e) => toggleFeature(app, f, e.currentTarget),
+  },
+  h('span', { class: 'sw', 'aria-hidden': 'true' }),
+  h('span', { class: 'ft' }, h('b', {}, f.label), h('span', { class: 'small' }, featureNote(f))))));
+}
+
+function confirmProfile(app, btn) {
+  btn.disabled = true;
+  delete state.open[`profile:${app.slug}`];
+  mutate(`/api/apps/${encodeURIComponent(app.slug)}/profile`, 'POST', { confirm: true });
+}
+
+function profileCard(app) {
+  const p = app.profile;
+  if (!p) return null;
+  const key = `profile:${app.slug}`;
+  const asking = !p.confirmedAt;
+  const open = asking || !!state.open[key];
+  const counts = `${plural(app.stepsTotal, 'launch step')} · ${plural(app.checksTotal, 'check')} · ${plural(app.openTasks, 'to-do')} for you`;
+  if (!open) {
+    const on = p.features.filter((f) => f.on);
+    return h('section', { class: 'card does slim', key: 'profile' },
+      icon('layers'),
+      h('span', { class: 'k' }, 'Tailored to'),
+      h('div', { class: 'tags' }, on.length ? on.map((f) => h('span', { class: 'tag', key: f.id }, f.label)) : h('span', { class: 'tag' }, 'No payments, sign-in or server data')),
+      h('span', { class: 'pill sm' }, p.sizeLabel),
+      h('button', { class: 'btn quiet sm', type: 'button', 'aria-expanded': 'false', onclick: () => { state.open[key] = true; render(); } }, 'Change'));
+  }
+  return h('section', { class: 'card does' + (asking ? ' ask' : ''), key: 'profile' },
+    h('div', { class: 'card-head' }, icon('layers'), h('h2', {}, `What ${app.name} does`), h('span', { class: 'pill sm' }, p.sizeLabel),
+      h('span', { class: 'end sub' }, asking ? 'Liftoff’s guess from the code' : 'Confirmed by you')),
+    h('div', { class: 'card-body' },
+      h('p', { class: 'small lead' }, asking
+        ? 'The launch steps, what needs you and the readiness checks follow from this. Turn off anything that doesn’t apply, and turn on anything still to come.'
+        : 'Change this whenever the app changes. The steps and checks follow at once, and nothing you’ve done is lost.'),
+      featureSwitches(app),
+      h('div', { class: 'does-foot' },
+        h('span', { class: 'small grow' }, counts),
+        asking
+          ? h('button', { class: 'btn primary', type: 'button', onclick: (e) => confirmProfile(app, e.currentTarget) }, icon('check'), 'Looks right')
+          : h('button', { class: 'btn', type: 'button', onclick: () => { delete state.open[key]; render(); } }, 'Done'))));
+}
+
 const STEP_ICON = { done: 'checkCircle', skipped: 'minus', running: 'spinner', blocked: 'x', todo: 'circle' };
 const STEP_WORD = { done: 'Done', skipped: 'Skipped', running: 'In progress', blocked: 'Blocked', todo: 'Not started' };
 
@@ -465,8 +545,10 @@ function renderApp(app) {
         h('div', { class: 'fact' }, h('div', { class: 'label' }, 'Readiness checks'), h('div', { class: 'value' }, app.checksDone, h('small', {}, ` / ${app.checksTotal}`))),
         h('div', { class: 'fact' }, h('div', { class: 'label' }, 'Blocking release'), h('div', { class: 'value' + (app.blockingTasks ? ' bad' : '') }, app.blockingTasks)))),
 
+    app.profile && !app.profile.confirmedAt ? profileCard(app) : null,
     hook('afterHero', app),
     nextCard(app),
+    app.profile?.confirmedAt ? profileCard(app) : null,
 
     h('section', { class: 'card' },
       h('div', { class: 'card-head' }, h('h2', {}, 'Launch steps'), h('span', { class: 'count' }, `${app.stepsDone}/${app.stepsTotal}`),
@@ -683,5 +765,5 @@ function start() {
   setTimeout(tick, hook('pollMs') || 4000);
 }
 
-window.Board = { configure, start, state, h, icon, api, mutate, go, render, refresh, toast, copy, ago, colorFor, avatar, host, plural, money, morph, repaint, setTheme, themeButton, PLATFORM, STEP_WORD, ICONS };
+window.Board = { configure, start, state, h, icon, api, mutate, go, render, refresh, toast, copy, ago, colorFor, avatar, host, plural, money, morph, repaint, setTheme, themeButton, featureSwitches, PLATFORM, STEP_WORD, ICONS };
 if (!document.body.hasAttribute('data-board-manual')) start();

@@ -235,6 +235,21 @@ test('free accounts skip the pass', async () => {
   }
 });
 
+test("an app the owner says takes no payments isn't sold the purchase test", async () => {
+  const { t, me, uid, slug, pass } = await setup();
+  try {
+    t.ctx.store.updateApp(uid, slug, (s) => { s.payments = ['stripe']; });
+    await me.post('/api/accounts/stripe', { values: { STRIPE_SECRET_KEY: 'sk_test_own' } });
+    assert.ok((await pass()).includes.includes('Liftoff’s own purchase test, with screenshots'));
+    assert.equal((await me.post(`/api/apps/${slug}/profile`, { feature: 'payments', on: false })).status, 200);
+    const p = await pass();
+    assert.deepEqual(p.includes, ['Pilot runs the launch steps in the cloud', 'Launch reports and the “Launch certified” badge'], 'even with Stripe connected');
+    assert.match(p.later, /purchase test is for apps that take payments/);
+  } finally {
+    await t.stop();
+  }
+});
+
 test("a mobile app's pass lists only what it can use", async () => {
   const { t, me, stripe } = await setup();
   try {

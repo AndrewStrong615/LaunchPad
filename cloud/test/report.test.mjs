@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { zipDirectory } from '../lib/archive.mjs';
-import { assess, badgeSvg, renderReport, requiredChecks } from '../lib/report.mjs';
+import { assess, badgeSvg, profileFacts, renderReport, requiredChecks } from '../lib/report.mjs';
 import { FIXTURES, signIn, startTest } from './helpers.mjs';
 
 const DAY = 86_400_000;
@@ -24,7 +24,11 @@ test('the checks a certificate needs', () => {
   assert.deepEqual(requiredChecks(app()), BASE);
   assert.deepEqual(requiredChecks(app({ steps: { payments: { provider: 'Stripe' } } })), [...BASE, 'pay-webhook', 'pay-e2e']);
   assert.deepEqual(requiredChecks(app({ payments: ['stripe'] })), [...BASE, 'pay-webhook', 'pay-e2e'], 'the code uses Stripe');
-  assert.deepEqual(requiredChecks(app(), { stripeConnected: true }), [...BASE, 'pay-webhook', 'pay-e2e'], 'Stripe connected, no provider chosen yet');
+  const selling = { profile: { set: { payments: true } } };
+  assert.deepEqual(requiredChecks(app(selling), { stripeConnected: true }), [...BASE, 'pay-webhook', 'pay-e2e'], 'takes payments, Stripe connected, no provider chosen yet');
+  assert.deepEqual(requiredChecks(app(), { stripeConnected: true }), BASE, 'Stripe is connected, but this app takes no payments');
+  assert.deepEqual(requiredChecks(app({ payments: ['stripe'], profile: { set: { payments: false } } })), BASE, 'the owner says it takes no payments');
+  assert.deepEqual(requiredChecks(app({ integrations: { supabase: true }, profile: { set: { database: false } } })), BASE, 'no server data, so no RLS check');
   assert.deepEqual(requiredChecks(app({ steps: { payments: { provider: 'Paddle' } } })), BASE);
   assert.deepEqual(requiredChecks(app({ integrations: { supabase: true } })), [...BASE, 'sec-rls']);
 });
@@ -78,7 +82,7 @@ test('certified only when every required check was proven by Liftoff in the last
 
 test("a check that isn't required can fail without blocking, but it costs score", () => {
   const checklist = { ...allProven(), 'pay-live': { done: false, by: null, at: null, verify: { ok: false, detail: 'Stripe key is still a test key', at: daysAgo(0) } } };
-  const a = assess(app({ checklist }), { now: NOW });
+  const a = assess(app({ checklist, profile: { set: { payments: true } } }), { now: NOW });
   assert.equal(a.certified, true);
   assert.equal(a.counts.failed, 1);
 });
@@ -101,7 +105,7 @@ test('the public page escapes everything and leaves out why checks failed', () =
     'crash-sdk': { done: false, by: null, at: null, verify: { ok: null, detail: 'set sentry.org and sentry.project to check events arrive', at: daysAgo(0) } },
   };
   checklist['land-legal'] = proven(1, '/privacy and /terms load');
-  const state = app({ name: '<img src=x onerror=alert(1)>', integrations: { supabase: true }, checklist, liveUrl: 'javascript:alert(1)' });
+  const state = app({ name: '<img src=x onerror=alert(1)>', integrations: { supabase: true }, checklist, liveUrl: 'javascript:alert(1)', profile: { set: { payments: true } } });
   const a = assess(state, { now: NOW });
   const html = renderReport({ id: 'rp_AAAAAAAAAAAAAAAAAAAA', createdAt: new Date(NOW).toISOString(), app: { name: state.name, framework: 'nextjs', platforms: ['web'], liveUrl: state.liveUrl }, ...a, purchase: null });
   assert.doesNotMatch(html, /<img src=x/);
@@ -115,6 +119,30 @@ test('the public page escapes everything and leaves out why checks failed', () =
   assert.match(html, /Live keys swapped in for production/, 'a check that points at no weakness is named');
   assert.doesNotMatch(html, /sk_test_123/);
   assert.doesNotMatch(html, /<script|style=/, 'no scripts or inline styles (CSP)');
+});
+
+test('the public page says what the checks fit, and what the team turned off that the code has', () => {
+  const plain = app({ checklist: allProven(), profile: { detected: {} } });
+  let a = assess(plain, { now: NOW });
+  const page = (state, a) => renderReport({ id: 'rp_AAAAAAAAAAAAAAAAAAAA', createdAt: new Date(NOW).toISOString(), app: { name: state.name, framework: 'nextjs', platforms: ['web'], liveUrl: state.liveUrl, profile: profileFacts(state) }, ...a, purchase: null });
+  let html = page(plain, a);
+  assert.equal(a.certified, true);
+  assert.match(html, /<p class="tailored">Liftoff tailors its checks to what an app does\. It checked Invoicely as a simple app \(it doesn('|’|&#39;)t take payments, has no sign-in/);
+  assert.doesNotMatch(html, /The team says/);
+
+  // Stripe is in the code but the team says it takes no payments: still
+  // certified on the rest, and the page says so.
+  const off = app({ payments: ['stripe'], integrations: { stripe: true }, checklist: allProven(), profile: { detected: { payments: { how: 'found', why: 'Stripe is in the code' } }, set: { payments: false } } });
+  a = assess(off, { now: NOW });
+  html = page(off, a);
+  assert.equal(a.certified, true);
+  assert.ok(!a.checks.some((c) => c.id === 'pay-e2e'), 'payment checks are left out');
+  assert.match(html, /The team says it doesn('|’|&#39;)t take payments, though its code suggests otherwise, so those checks weren('|’|&#39;)t required\./);
+
+  // Reports made before this have no profile, and say nothing about it.
+  html = renderReport({ id: 'rp_AAAAAAAAAAAAAAAAAAAA', createdAt: new Date(NOW).toISOString(), app: { name: 'Old', framework: 'nextjs', platforms: ['web'], liveUrl: null }, ...a, purchase: null });
+  assert.doesNotMatch(html, /class="tailored"/);
+  assert.match(html, /Checks that don('|’|&#39;)t fit what the app does are left out/);
 });
 
 test("the public page counts security checks that haven't passed without naming them", () => {

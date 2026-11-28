@@ -59,7 +59,17 @@ Requires Node 18+. No npm dependencies.
 
 ## Launch steps
 
-Picked per app from the platforms it ships to (web, iOS, Android), and run in dependency order (payments waits for sign-in and the deployed URL its webhook needs; the review pre-check waits for the privacy URL). `liftoff plan --explain` shows the order and what each step does. Each step has a skill in `skills/` that tells Claude exactly how to do it.
+Picked per app from the platforms it ships to (web, iOS, Android) and from what the app does, and run in dependency order (payments waits for sign-in and the deployed URL its webhook needs; the review pre-check waits for the privacy URL). `liftoff plan --explain` shows the order and what each step does. Each step has a skill in `skills/` that tells Claude exactly how to do it.
+
+### Tailored to what the app does
+
+`liftoff init` works out what the app does from its code: takes payments, signs people in, saves data on a server, sends email, uses AI models, takes uploads, or shows what people post. Each is found (a library for it, like Stripe), likely (a hint, like a pricing page, or what another implies: paying customers need accounts), or not seen. The launch follows it:
+
+- **Steps**: a free app with no accounts skips Database, Sign-in, Email, Payments, Paywall and the purchase flow test (7 steps for a simple web app instead of 13). Apps with AI, uploads or posts get an extra **Abuse and spend limits** step (`safety`).
+- **Needs you**: paperwork only for what applies. Stripe activation, the Paid Apps Agreement and the Play payments profile only for apps that take payments; an AI spend-limit task for apps that use AI models. Open paperwork that stops applying leaves the list.
+- **Readiness checks**: payment, sign-in, email and database checks only where they fit, plus extra checks for AI features, uploads and what people post (App Store guideline 1.2). The readiness score counts only these.
+
+`liftoff profile` shows what Liftoff found and why. Correct it with `liftoff profile payments off` (or `on` for something you want added), and `liftoff profile --confirm` once it's right. On the Flight Board it's the **What this app does** card at the top of each app. Nothing you've done is lost when you turn something off: it comes back if you turn it on again.
 
 | Step | Skill | Provider |
 | --- | --- | --- |
@@ -71,6 +81,7 @@ Picked per app from the platforms it ships to (web, iOS, Android), and run in de
 | Analytics | `analytics` | PostHog |
 | Crash tracking | `crash-reports` | Sentry |
 | CI/CD | `ci-cd` | GitHub Actions (+ EAS / fastlane for mobile) |
+| Abuse and spend limits | `safety` | Per-user AI limits, upload limits, report and block (AI, uploads or posts only) |
 | Purchase flow test | `money-path-test` | Playwright (web), Maestro (mobile) |
 | Uptime + alerts | `monitoring` | GitHub Actions uptime check, Sentry and Stripe alerts |
 | Landing page | `landing-page` | Built into your app or a small static site |
@@ -99,7 +110,8 @@ Keys live in the OS keychain (macOS Keychain, or the Linux Secret Service via `s
 - **Overview**: how many apps are live, what's blocking a release, and a card per app with its launch steps and readiness.
 - **Needs you**: every task waiting on a person, blockers on top. Add your own or tick them off here.
 - **One page per app**: live URL, test builds, recent activity, and the accounts the app uses.
-- **Release readiness**: around 50 checks across payments, hosting, analytics, builds, the landing page, App Store, Google Play and security. Some tick themselves from the code, and **Verify** re-checks them against the live services and says why anything failed.
+- **What this app does**: the switches the steps and checks follow (see above).
+- **Release readiness**: up to 60 checks across payments, hosting, analytics, builds, the landing page, App Store, Google Play, security, AI, uploads and what people post, limited to the ones that fit the app. Some tick themselves from the code, and **Verify** re-checks them against the live services and says why anything failed.
 - **Do this next**: one recommended action, with the number behind it.
 - **Pulse**: MRR, subscribers, sign-ups, paywall conversion, crash-free sessions and uptime, refreshed when you ask.
 
