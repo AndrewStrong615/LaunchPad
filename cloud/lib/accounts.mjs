@@ -48,6 +48,8 @@ export function listUserAccounts(store, uid) {
   });
 }
 
+export const stripeConnected = (store, uid) => listUserAccounts(store, uid).some((a) => a.id === 'stripe' && a.connected);
+
 export function connectUserAccount(store, uid, id, values, source = 'you') {
   const def = ACCOUNTS[id];
   if (!def) throw Object.assign(new Error(`Unknown account "${id}"`), { status: 404 });

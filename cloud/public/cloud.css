@@ -469,6 +469,34 @@ pre.cmd::before { content: "$ "; color: #8f8fa6; }
 .proof-steps .shot img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
 .proof .row { padding-top: 6px; }
 
+/* the launch report */
+.report-what { margin: 10px 0 8px; color: var(--muted); }
+.report-score { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 4px 0 6px; }
+.report-score .num { font-size: 28px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--ink); }
+.report-score .num span { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 2px; }
+.report-score .small { color: var(--muted); }
+.report-missing { list-style: none; margin: 4px 0 8px; padding: 0; }
+.report-missing li { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.report-missing li > .i { flex: none; width: 14px; height: 14px; margin-top: 3px; color: var(--faint); }
+.report-missing li.more { color: var(--muted); padding-left: 22px; }
+.report .row { padding-top: 6px; flex-wrap: wrap; }
+.report-badge { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-2); }
+.report-badge .k { font-size: 13px; font-weight: 600; color: var(--ink); }
+.report-badge .small { color: var(--muted); }
+.report-badge .badge-img { display: block; height: 20px; width: auto; }
+.report-badge .in { min-width: 0; font-family: var(--mono); font-size: 12px; }
+.report-history { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-2); }
+.report-history summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.report-history ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.report-history li { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 13px; }
+.report-history li a { color: var(--ink-2); text-decoration: none; min-width: 0; }
+.report-history li a:hover { text-decoration: underline; }
+.report .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.report .btn.ghost:hover { color: var(--bad); background: var(--bad-soft); }
+.report-down { margin: 10px 0 0; }
+.report .link { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.report .link:hover { color: var(--bad); }
+
 /* settings */
 .set { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 4px 14px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line-2); }
 .set:first-child { border-top: 0; }
