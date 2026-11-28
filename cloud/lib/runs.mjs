@@ -5,6 +5,8 @@
 // assistant by its Liftoff name, the run's mode and tokens (lib/brand.mjs).
 import crypto from 'node:crypto';
 import { STEPS, stepsFor } from '../../lib/catalog.mjs';
+import { confirmProfile } from '../../lib/state.mjs';
+import { featuresOf } from '../../lib/profile.mjs';
 import { DEFAULT_MODEL, EFFORT, MODELS, kickoff, modelFor, tierOf } from './agent.mjs';
 import { DEFAULT_TOKENS_PER_USD, fromTokens, toTokens, tokenWord } from './brand.mjs';
 import { sandboxEnvPlan, syncVault } from './accounts.mjs';
@@ -138,11 +140,11 @@ export class RunManager {
     const state = store.loadApp(uid, slug);
     if (!state) throw new HttpError(404, 'No such app');
 
-    const valid = new Set(stepsFor(state.platforms).map((s) => s.id));
+    const fit = stepsFor(state.platforms, featuresOf(state)).map((s) => s.id);
     const picked = [...new Set((Array.isArray(steps) ? steps : []).map(String))];
-    const unknown = picked.filter((s) => !valid.has(s));
+    const unknown = picked.filter((s) => !fit.includes(s));
     if (unknown.length) throw new HttpError(400, `These steps don't apply to this app: ${unknown.join(', ')}`);
-    const ordered = stepsFor(state.platforms).map((s) => s.id).filter((id) => picked.includes(id));
+    const ordered = fit.filter((id) => picked.includes(id));
 
     const mine = store.allRuns((r) => r.uid === uid && LIVE.has(r.status));
     const open = store.listRuns(uid, slug).find((r) => OPEN.has(r.status));
@@ -173,7 +175,11 @@ export class RunManager {
     this.ctx.records?.begin(run, state);
     this.push(run, { kind: 'status', text: ordered.length ? `Starting a run for ${ordered.map((id) => STEPS.find((s) => s.id === id)?.label || id).join(', ')}` : 'Starting a run for every step that is left' });
     this.save(run);
-    store.updateApp(uid, slug, (s) => s.log.push({ at: run.createdAt, msg: `Started a cloud run (${ordered.length ? ordered.join(', ') : 'all remaining steps'})` }));
+    store.updateApp(uid, slug, (s) => {
+      // Starting a run on the steps shown means the plan, and what the app does, looks right.
+      if (!s.profile?.confirmedAt) confirmProfile(s);
+      s.log.push({ at: run.createdAt, msg: `Started a cloud run (${ordered.length ? ordered.join(', ') : 'all remaining steps'})` });
+    });
 
     // The slow part (vault, upload, session) happens after the response.
     this.launch(run, state, token).catch((e) => this.fail(run, e));

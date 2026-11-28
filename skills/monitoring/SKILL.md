@@ -14,4 +14,4 @@ description: Add a health endpoint, an uptime check and alerts for downtime, cra
    - Failed payments: turn on Stripe Smart Retries and customer emails for failed payments (Billing settings). That's a dashboard setting: add a task with the link if you can't set it via API.
 4. Verify: `liftoff verify --only mon-uptime`.
 
-Record: `liftoff step monitoring done`, `liftoff record monitoring --file .github/workflows/liftoff-uptime.yml`; tick `mon-alerts` when the alerts above exist.
+Record: `liftoff step monitoring done`, `liftoff record monitoring --file .github/workflows/liftoff-uptime.yml`; tick `mon-alerts` when the downtime and crash spike alerts exist, and `pay-alerts` when the failed webhook and failed payment alerts do (apps that take payments only; skip those two otherwise).

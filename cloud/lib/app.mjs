@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { addTask, removeTask, setCheck, setConfig, setTaskDone, summarize, CONFIG_KEYS } from '../../lib/state.mjs';
+import { addTask, confirmProfile, removeTask, setCheck, setConfig, setFeature, setTaskDone, summarize, CONFIG_KEYS } from '../../lib/state.mjs';
+import { featuresOf } from '../../lib/profile.mjs';
 import { nextAction } from '../../lib/advice.mjs';
 import { costReport } from '../../lib/costs.mjs';
 import { ACCOUNTS, stepsFor } from '../../lib/catalog.mjs';
@@ -423,6 +424,19 @@ export function createApp(ctx) {
         const body = await readJson(req);
         return save((s) => setCheck(s, rest[1], body.done !== false, 'you'));
       }
+      if (rest[0] === 'profile' && rest.length === 1 && M === 'POST') {
+        // What the app does (lib/profile.mjs): { feature, on: true | false | null }
+        // corrects one; { confirm: true } says it's right. Steps, paperwork and
+        // checks follow at once.
+        limit(`profile:${uid}`, 60, 60000);
+        const body = await readJson(req);
+        if (body.feature === undefined && body.confirm !== true) throw new HttpError(400, 'Send { feature, on } or { confirm: true }.');
+        if (body.feature !== undefined && body.on !== undefined && body.on !== null && typeof body.on !== 'boolean') throw new HttpError(400, 'on is true, false or null.');
+        return save((s) => {
+          if (body.feature !== undefined) setFeature(s, String(body.feature), body.on ?? null);
+          if (body.confirm === true) confirmProfile(s);
+        });
+      }
       if (rest[0] === 'settings' && M === 'POST') {
         const body = await readJson(req);
         const value = validateSetting(String(body.key || ''), body.value);
@@ -467,7 +481,7 @@ export function createApp(ctx) {
           return res.end(body);
         }
       }
-      if (rest[0] === 'steps' && M === 'GET') return ok(stepsFor(state.platforms).map((s) => ({ id: s.id, label: s.label, does: s.does })));
+      if (rest[0] === 'steps' && M === 'GET') return ok(stepsFor(state.platforms, featuresOf(state)).map((s) => ({ id: s.id, label: s.label, does: s.does })));
     }
     throw new HttpError(404, 'Not found');
   }

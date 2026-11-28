@@ -4,8 +4,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  addDeploy, addTask, recordChange, setCheck, setConfig, setStep, summarize, CONFIG_KEYS,
+  addDeploy, addTask, recordChange, setCheck, setConfig, setFeature, setStep, summarize, CONFIG_KEYS,
 } from '../../lib/state.mjs';
+import { FEATURE_IDS, featuresOf } from '../../lib/profile.mjs';
 import { STEPS, accountsForStep, checklistFor } from '../../lib/catalog.mjs';
 import { nextAction } from '../../lib/advice.mjs';
 import { renderScaffold, SCAFFOLDS } from '../../lib/scaffold.mjs';
@@ -114,6 +115,13 @@ export function planFor(state, accounts, envPlan, custom = accounts.filter((a) =
   return {
     app: { name: state.name, framework: state.framework, platforms: state.platforms, auth: state.auth || null, payments: state.payments || [], packageManager: state.packageManager || null, apps: state.apps || [] },
     source: state.source ? { type: state.source.type, repo: state.source.fullName || null, branch: state.source.ref || null } : null,
+    // What the app does. The steps and checks below only cover what's on.
+    profile: {
+      size: summary.profile.size,
+      does: summary.profile.features.filter((f) => f.on).map((f) => ({ id: f.id, label: f.label, from: f.source === 'you' ? 'the user' : f.source === 'code' ? 'the code' : f.source === 'launch' ? 'launch progress' : f.source === 'unsure' ? 'not built yet; kept until the user says the app won’t need it' : 'a guess from the code' })),
+      doesNot: summary.profile.features.filter((f) => !f.on).map((f) => ({ id: f.id, label: f.label, from: f.source === 'you' ? 'the user' : 'nothing in the code' })),
+      confirmedByUser: !!summary.profile.confirmedAt,
+    },
     liveUrl: state.liveUrl,
     steps: summary.steps.map((s) => {
       const def = STEPS.find((x) => x.id === s.id);
@@ -153,7 +161,7 @@ export function planFor(state, accounts, envPlan, custom = accounts.filter((a) =
 }
 
 function checklistView(ctx, uid, state) {
-  return checklistFor(state.platforms).map((c) => {
+  return checklistFor(state.platforms, featuresOf(state)).map((c) => {
     const cur = state.checklist[c.id] || {};
     return { id: c.id, category: c.category, title: c.title, done: !!cur.done, by: cur.by || undefined, verify: cur.verify ? `${cur.verify.ok === true ? 'pass' : cur.verify.ok === false ? 'FAIL' : 'not checked'}: ${cur.verify.detail}` : undefined, provable: isProvable(ctx, uid, state, c.id) || undefined };
   });
@@ -242,6 +250,19 @@ const HANDLERS = {
       task = dup || addTask(s, title, { blocksRelease: input.blocks_release === true, owner: 'you', url });
     });
     return { added: task.title, id: task.id, blocksRelease: task.blocksRelease };
+  },
+
+  // The user said the app does (or doesn't do) something: the plan follows.
+  liftoff_profile(ctx, run, input) {
+    const feature = str(input.feature, 40);
+    if (!FEATURE_IDS.includes(feature)) throw new Error(`feature is one of ${FEATURE_IDS.join(', ')}`);
+    if (typeof input.on !== 'boolean') throw new Error('on is true or false');
+    let steps;
+    ctx.store.updateApp(run.uid, run.slug, (s) => {
+      setFeature(s, feature, input.on);
+      steps = summarize(s, { accounts: listUserAccounts(ctx.store, run.uid) }).steps.map((x) => `${x.id} (${x.status})`);
+    });
+    return { feature, on: input.on, steps };
   },
 
   liftoff_checklist(ctx, run) {
@@ -394,6 +415,7 @@ export function describeTool(name, input = {}) {
     case 'liftoff_step': return `${i.step} → ${i.status}${i.note ? `: ${i.note}` : ''}`;
     case 'liftoff_task': return `Added a task for you: ${i.title}`;
     case 'liftoff_checklist': return 'Read the readiness checklist';
+    case 'liftoff_profile': return `Marked the app as ${i.on === false ? 'not ' : ''}${{ payments: 'taking payments', accounts: 'signing people in', database: 'saving data on a server', email: 'sending email', ai: 'using AI models', uploads: 'taking uploads', community: 'showing what people post' }[i.feature] || i.feature}`;
     case 'liftoff_check': return `${i.done === false ? 'Unticked' : 'Ticked'} ${i.item}`;
     case 'liftoff_record': return `Recorded ${i.kind} ${i.value}`;
     case 'liftoff_deploy': return `Recorded a ${i.platform} deploy${i.url ? ` at ${i.url}` : ''}`;
