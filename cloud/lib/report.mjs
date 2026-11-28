@@ -14,6 +14,7 @@ import { checklistFor } from '../../lib/catalog.mjs';
 import { sellsWithStripe, VERIFIABLE } from '../../lib/verify.mjs';
 import { STEPS } from '../../proof/protocol.mjs';
 import { stripeConnected as hasStripe } from './accounts.mjs';
+import { DEFAULT_ASSISTANT } from './brand.mjs';
 import { HttpError } from './http.mjs';
 import { verifyApp } from './tools.mjs';
 
@@ -243,7 +244,8 @@ export function badgeSvg(latest) {
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const longDate = (iso) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
-const BY = { claude: 'Claude', you: 'the owner', auto: 'detected in the code', verified: 'Liftoff' };
+// Who ticked an item by hand. 'claude' is the assistant, shown by its Liftoff name.
+const BY = { you: 'the owner', auto: 'detected in the code', verified: 'Liftoff' };
 const TICK = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 7 10 16l-4-4"/></svg>';
 const CROSS = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
 const DOT = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/></svg>';
@@ -256,14 +258,15 @@ function section(title, intro, rows, { folded = false } = {}) {
 }
 
 // Failed checks show no details: a public page shouldn't point at a weakness.
-export function renderReport(report, { home = '/' } = {}) {
+export function renderReport(report, { home = '/', assistant = DEFAULT_ASSISTANT } = {}) {
   const r = report;
+  const by = (who) => (who === 'claude' ? assistant : BY[who]);
   const { checks } = r;
   const row = (c, icon, cls, note) => `<li class="${cls}">${icon}<div><div class="t">${esc(c.title)}${c.required ? ' <span class="req">Required</span>' : ''}</div>${note ? `<div class="d">${esc(note)}</div>` : ''}</div></li>`;
   const proven = checks.filter((c) => c.status === 'proven').sort((a, b) => b.required - a.required).map((c) => row(c, TICK, 'ok', [c.detail, c.at && `checked ${day(c.at)}`].filter(Boolean).join(' · ')));
   const failed = checks.filter((c) => c.status === 'failed').map((c) => row(c, CROSS, 'bad', `didn't pass on ${day(c.at) || day(r.createdAt)}`));
   const unproven = checks.filter((c) => c.status === 'unproven' || c.status === 'stale').sort((a, b) => b.required - a.required).map((c) => row(c, DOT, 'none', c.status === 'stale' ? `last proven ${day(c.at)}` : c.required ? 'not proven yet' : null));
-  const reported = checks.filter((c) => c.status === 'reported').map((c) => row(c, DOT, 'rep', `marked done by ${BY[c.by] || 'hand'}${c.at ? ` on ${day(c.at)}` : ''}`));
+  const reported = checks.filter((c) => c.status === 'reported').map((c) => row(c, DOT, 'rep', `marked done by ${by(c.by) || 'hand'}${c.at ? ` on ${day(c.at)}` : ''}`));
   const open = checks.filter((c) => c.status === 'open').map((c) => row(c, DOT, 'none', null));
 
   const purchase = r.purchase ? `<section><h2>Purchase test</h2><p class="intro">Liftoff's own browser bought, cancelled and re-checked a subscription on ${esc(longDate(r.purchase.at))}${r.purchase.checkout ? ` (Stripe test checkout ${esc(r.purchase.checkout)})` : ''}. Stripe's records confirmed it.</p><ol class="steps">${r.purchase.steps.map((s) => `<li class="${s.ok ? 'ok' : 'bad'}">${s.ok ? TICK : CROSS}<div><div class="t">${esc(s.label)}</div><div class="d">${esc(s.detail)}</div></div>${s.shot ? `<a class="shot" href="${esc(`/r/${r.id}/${s.shot}`)}"><img src="${esc(`/r/${r.id}/${s.shot}`)}" alt="${esc(`Screenshot: ${s.label}`)}" loading="lazy"></a>` : ''}</li>`).join('')}</ol></section>` : '';
@@ -284,7 +287,7 @@ ${section('Proven by Liftoff', "Each of these was checked from Liftoff's own ser
 ${purchase}
 ${section("Didn't pass", null, failed)}
 ${section('Not proven yet', null, unproven)}
-${section('Reported, not proven', 'Done according to the team or Claude. Liftoff counts these as half in the score and never certifies on them.', reported)}
+${section('Reported, not proven', `Done according to the team or ${assistant}. Liftoff counts these as half in the score and never certifies on them.`, reported)}
 ${section('Still open', 'Steps no one has marked done yet.', open, { folded: true })}
 <footer><p>Liftoff certifies a launch only when every required check (the site is live on HTTPS with privacy and terms pages, no secret keys ship in the code, and for apps that sell through Stripe, a webhook and a full test purchase) ran on its server and passed in the ${PROOF_MAX_AGE_DAYS} days before the report. Other checks are shown as they stood and count toward the score. This page is a snapshot from ${esc(longDate(r.createdAt))}.</p>
 <p><a class="cta" href="${esc(home)}">Launch your app with Liftoff</a></p></footer>

@@ -10,7 +10,7 @@ import { FIXTURES, signIn, startTest, until } from './helpers.mjs';
 
 const userDirs = (srv) => fs.readdirSync(path.join(srv.dataDir, 'users'));
 
-test('theme and default model are saved to the account, and new runs use that model', async (t) => {
+test('theme and default mode are saved to the account, and new runs use that mode', async (t) => {
   let release;
   const gate = new Promise((r) => { release = r; });
   const client = fakeAnthropic(async (s, tools) => {
@@ -33,38 +33,41 @@ test('theme and default model are saved to the account, and new runs use that mo
 
   const me = await signIn(srv.base);
   let r = await me.get('/api/me');
-  assert.deepEqual(r.body.prefs, { theme: 'system', model: null });
+  assert.deepEqual(r.body.prefs, { theme: 'system', tier: null });
   assert.equal(r.body.user.via, 'local');
   assert.ok(r.body.user.createdAt);
-  assert.equal(r.body.models.default, 'claude-sonnet-5-5');
-  assert.equal(r.body.models.server, 'claude-sonnet-5-5');
+  assert.equal(r.body.tiers.default, 'cruise');
+  assert.equal(r.body.tiers.server, 'cruise');
 
   r = await me.post('/api/me/prefs', { theme: 'dark' });
   assert.equal(r.status, 200, r.text);
   assert.equal(r.body.prefs.theme, 'dark');
   r = await me.post('/api/me/prefs', { theme: 'purple' });
   assert.equal(r.status, 400);
-  r = await me.post('/api/me/prefs', { model: 'gpt-9' });
+  r = await me.post('/api/me/prefs', { tier: 'warp' });
   assert.equal(r.status, 400);
-  r = await me.post('/api/me/prefs', { model: 'claude-opus-5-5' });
+  assert.match(r.body.error, /Cruise, Boost/);
+  r = await me.post('/api/me/prefs', { tier: 'boost' });
   assert.equal(r.body.prefs.theme, 'dark', 'changing one setting keeps the other');
-  assert.equal(r.body.models.default, 'claude-opus-5-5');
+  assert.equal(r.body.tiers.default, 'boost');
   r = await me.get('/api/me');
-  assert.deepEqual(r.body.prefs, { theme: 'dark', model: 'claude-opus-5-5' });
+  assert.deepEqual(r.body.prefs, { theme: 'dark', tier: 'boost' });
+  // Saved as the model behind the mode, as before, so older accounts keep their choice.
+  assert.equal(srv.ctx.store.getUser(userDirs(srv)[0]).prefs.model, 'claude-opus-5-5');
 
   // A run started without a model uses the account's default.
   const zip = zipDirectory(path.join(FIXTURES, 'next-saas'));
   await me.call('POST', '/api/import/zip?name=a.zip', zip, { 'content-type': 'application/zip' });
   r = await me.post('/api/apps/invoicely/runs', { steps: ['hosting'] });
   assert.equal(r.status, 200, r.text);
-  assert.equal(r.body.model, 'claude-opus-5-5');
+  assert.equal(r.body.tier, 'boost');
   await until(() => client.calls.find((c) => c[0] === 'sessions.create'));
   assert.equal(client.calls.find((c) => c[0] === 'sessions.create')[1].agent.model.id, 'claude-opus-5-5');
 
   // Back to the server's default.
-  r = await me.post('/api/me/prefs', { model: null });
-  assert.equal(r.body.prefs.model, null);
-  assert.equal(r.body.models.default, 'claude-sonnet-5-5');
+  r = await me.post('/api/me/prefs', { tier: null });
+  assert.equal(r.body.prefs.tier, null);
+  assert.equal(r.body.tiers.default, 'cruise');
 });
 
 test('signing out other devices keeps this one', async (t) => {
@@ -104,7 +107,7 @@ test('deleting an account removes its data and its keys in Claude\'s vault, but 
   assert.equal(r.status, 400);
   r = await me.call('DELETE', '/api/me', { confirm: 'you' });
   assert.equal(r.status, 409);
-  assert.match(r.body.error, /Stop your Claude runs first/);
+  assert.match(r.body.error, /Stop your runs first/);
 
   await me.post(`${url}/stop`);
   await until(async () => !['running', 'starting', 'needs-you'].includes((await me.get(url)).body.status));

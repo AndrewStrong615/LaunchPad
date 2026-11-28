@@ -1,7 +1,8 @@
-// The Claude that runs launches in the cloud: a Managed Agent (Anthropic runs
-// the agent loop and a private sandbox per run). Its tools are the sandbox's
-// own (bash, files) plus Liftoff tools that this server carries out, so
-// Liftoff's records, checks and keys stay on the server.
+// The assistant that runs launches in the cloud (Pilot to the user, see
+// lib/brand.mjs): a Claude Managed Agent, so Anthropic runs the agent loop and
+// a private sandbox per run. Its tools are the sandbox's own (bash, files)
+// plus Liftoff tools that this server carries out, so Liftoff's records,
+// checks and keys stay on the server.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,18 +10,28 @@ import { CONFIG_KEYS } from '../../lib/state.mjs';
 import { STEP_STATUSES } from '../../lib/catalog.mjs';
 import { SCAFFOLDS } from '../../lib/scaffold.mjs';
 import { ACCOUNT_HOSTS } from './accounts.mjs';
+import { DEFAULT_ASSISTANT } from './brand.mjs';
 
 export const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const SKILLS = fs.readdirSync(path.join(ROOT, 'skills')).filter((d) => fs.existsSync(path.join(ROOT, 'skills', d, 'SKILL.md'))).sort();
-// Models a run can use. Sonnet is the default: strong at setup and coding work
-// for about half the cost. Opus is there for steps that get stuck.
+// Models a run can use. People pick a mode, never a model: Cruise is the
+// default, strong at setup and coding work for about half the cost; Boost is
+// there for steps that get stuck. The model ids and names stay on the server
+// (the admin-only run records show both). See lib/brand.mjs.
 export const MODELS = [
-  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', hint: 'Fast and about half the cost. Right for most steps.' },
-  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', hint: 'For steps that got stuck or need more care. Costs about twice as much.' },
+  { id: 'claude-sonnet-5-5', tier: 'cruise', label: 'Cruise', name: 'Claude Sonnet 5.5', hint: 'Quick and light on tokens. Right for most steps.' },
+  { id: 'claude-opus-5-5', tier: 'boost', label: 'Boost', name: 'Claude Opus 5.5', hint: 'Thinks harder, for steps that got stuck or need more care. Uses about twice the tokens.' },
 ];
 export const DEFAULT_MODEL = MODELS[0].id;
+export const STRONGEST_TIER = 'boost';
+// The modes as the web app sees them: no model ids.
+export const TIERS = MODELS.map(({ tier, label, hint }) => ({ id: tier, label, hint }));
+export const tierOf = (model) => MODELS.find((m) => m.id === model)?.tier || null;
+// A mode (or, for the server's own settings, a model id) → the model id.
+export const modelFor = (value) => MODELS.find((m) => m.tier === value || m.id === value)?.id || null;
+export const tierLabel = (tier) => MODELS.find((m) => m.tier === tier)?.label || tier;
 export const EFFORT = 'high';
-export const PROMPT_VERSION = '2';
+export const PROMPT_VERSION = '3';
 
 const obj = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
@@ -80,7 +91,7 @@ export const CUSTOM_TOOLS = [
   }, ['name', 'from'])),
 ];
 
-export const SYSTEM_PROMPT = `You are Liftoff, running in the cloud. You launch the user's app end to end: database, sign-in, hosting, payments, paywall, email, analytics, crash reports, CI/CD, a purchase flow test, uptime alerts, a landing page, growth basics, beta builds and the store listing. You do the work yourself, in a private sandbox that holds a copy of the user's code.
+export const systemPrompt = (name = DEFAULT_ASSISTANT) => `You are ${name}, Liftoff's launch assistant, running in the cloud. You launch the user's app end to end: database, sign-in, hosting, payments, paywall, email, analytics, crash reports, CI/CD, a purchase flow test, uptime alerts, a landing page, growth basics, beta builds and the store listing. You do the work yourself, in a private sandbox that holds a copy of the user's code.
 
 The user follows along in the Liftoff web app. They see your messages, the commands you run and the questions you ask. They are not watching a terminal and may be away for hours, so keep working on everything that doesn't need them.
 
@@ -133,9 +144,11 @@ The sandbox reaches package registries, GitHub and the connected services' APIs,
 - Never commit secrets.
 
 ## Talking to the user
+- The user knows you as ${name}. You run on Claude, an AI model made by Anthropic: if the user asks which AI or model you are, say so plainly.
 - After each finished step, send one short line, like "✓ Payments + paywall: Stripe in test mode, webhook verified".
 - Ask one question at a time, with 2 to 4 short options when you can.
 - End with a short summary: what's live (URLs, builds), what liftoff_verify proved and what failed, what's left for the user (open tasks, release blockers first, with lead times), and the single next action from liftoff_plan.`;
+export const SYSTEM_PROMPT = systemPrompt();
 
 export function sandboxHosts(extra = []) {
   const hosts = new Set(['github.com', 'api.github.com', 'codeload.github.com', 'objects.githubusercontent.com', 'raw.githubusercontent.com', 'expo.dev', ...extra]);
@@ -143,12 +156,12 @@ export function sandboxHosts(extra = []) {
   return [...hosts].sort();
 }
 
-export function agentDefinition() {
+export function agentDefinition({ assistant = DEFAULT_ASSISTANT } = {}) {
   return {
     name: 'Liftoff Cloud launcher',
     description: "Launches a user's app end to end from the Liftoff web app, using the Liftoff plugin's skills.",
     model: { id: DEFAULT_MODEL, effort: EFFORT },
-    system: SYSTEM_PROMPT,
+    system: systemPrompt(assistant),
     tools: [
       {
         type: 'agent_toolset_20260401',

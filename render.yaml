@@ -39,9 +39,14 @@ services:
         sync: false
       - key: GITHUB_CLIENT_SECRET
         sync: false
-      # Spending cap per run, in US dollars.
+      # Spending cap per run, in US dollars (people see it in tokens).
       - key: LIFTOFF_RUN_BUDGET_USD
         value: "15"
+      # What people call the assistant, and how many tokens they see per dollar of model spend.
+      - key: LIFTOFF_ASSISTANT_NAME
+        value: Pilot
+      - key: LIFTOFF_TOKENS_PER_USD
+        value: "100"
       # Liftoff's test browser, over Render's private network.
       - fromGroup: liftoff-proof
       - key: LIFTOFF_PROOF_URL

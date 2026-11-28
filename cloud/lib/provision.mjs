@@ -10,7 +10,7 @@ import { fingerprint } from './crypto.mjs';
 export async function provision(client, config, { force = false, log = () => {} } = {}) {
   const a = config.anthropic;
   if (!a.managed && !force) return { changed: false };
-  const agent = agentDefinition();
+  const agent = agentDefinition({ assistant: config.assistant });
   const environment = environmentDefinition(config.extraHosts);
   const hash = fingerprint(JSON.stringify(agent), JSON.stringify(environment));
   if (!force && a.agentId && a.environmentId && a.savedHash === hash) return { changed: false };

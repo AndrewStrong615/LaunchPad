@@ -1,5 +1,5 @@
 // The Launch Pass: what it opens, Stripe Checkout and the webhook that grant
-// it, and the Claude time it includes.
+// it, and the tokens it includes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -71,7 +71,8 @@ test('the paid parts need a Launch Pass, and Checkout grants it', async () => {
     assert.equal(p.enabled, true);
     assert.equal(p.unlocked, false);
     assert.equal(p.testMode, true);
-    assert.deepEqual(p.price, { usd: 149, claudeUsd: 50 });
+    assert.deepEqual(p.price, { usd: 149, tokens: 5000 }, 'the pass is charged in dollars and shown with its tokens');
+    assert.equal(p.includes[0], 'Pilot runs the launch steps in the cloud');
     assert.equal(p.pass, null);
 
     // Free: the scan, verify and the score. Paid: runs, the purchase test, reports.
@@ -87,6 +88,7 @@ test('the paid parts need a Launch Pass, and Checkout grants it', async () => {
     assert.equal(r.status, 200, r.text);
     assert.match(r.body.url, /^https:\/\/checkout\.stripe\.com\//);
     const form = stripe.created[0];
+    assert.match(form['line_items[0][price_data][product_data][description]'], /cloud runs with Pilot and 5,000 tokens/);
     assert.equal(form.mode, 'payment');
     assert.equal(form['line_items[0][price_data][unit_amount]'], '14900');
     assert.equal(form['line_items[0][price_data][currency]'], 'usd');
@@ -109,9 +111,9 @@ test('the paid parts need a Launch Pass, and Checkout grants it', async () => {
     assert.equal(res.headers.get('location'), `/?pass=ok#${slug}`);
     p = await pass();
     assert.equal(p.unlocked, true);
-    assert.deepEqual(p.pass.claude, { included: 50, used: 0, left: 50 });
+    assert.deepEqual(p.pass.tokens, { included: 5000, used: 0, left: 5000, held: 0, usedUp: false });
     await back(id); // the same checkout again changes nothing
-    assert.deepEqual((await pass()).pass.claude, { included: 50, used: 0, left: 50 });
+    assert.deepEqual((await pass()).pass.tokens, { included: 5000, used: 0, left: 5000, held: 0, usedUp: false });
     assert.equal((await me.post(`/api/apps/${slug}/pass`)).status, 409, 'one pass at a time');
     assert.equal((await me.post(`/api/apps/${slug}/report`)).status, 200, 'reports are open now');
 
@@ -153,7 +155,7 @@ test("Stripe's webhook grants the pass when the tab was closed", async () => {
     assert.equal(ok.status, 200, 'Stripe sends no Origin of ours');
     assert.equal((await pass()).unlocked, true);
     await hook(raw, sign(raw));
-    assert.deepEqual((await pass()).pass.claude, { included: 50, used: 0, left: 50 }, 'a retried event counts once');
+    assert.deepEqual((await pass()).pass.tokens, { included: 5000, used: 0, left: 5000, held: 0, usedUp: false }, 'a retried event counts once');
     stripe.pay(session.id);
     assert.equal((await fetch(`${t.base}/billing/done?session_id=${session.id}`, { redirect: 'manual', headers: { cookie: me.cookie } })).headers.get('location'), `/?pass=ok#${slug}`);
   } finally {
@@ -170,7 +172,7 @@ test('Stripe signatures', () => {
   assert.equal(checkStripeSignature(WHSEC, sign(raw, Math.floor(Date.now() / 1000) + 3600), raw), false);
 });
 
-test('runs spend the Claude time on the pass, and removing the app keeps the count', async () => {
+test('runs spend the tokens on the pass, and removing the app keeps the count', async () => {
   const client = fakeAnthropic(async (s, tools) => tools.end('500'));
   const { t, me, stripe, slug, uid, pass, back, zip } = await setup({ anthropic: client });
   try {
@@ -180,7 +182,7 @@ test('runs spend the Claude time on the pass, and removing the app keeps the cou
     await back(id);
     // An earlier run on this app cost $40.
     t.ctx.store.saveRun({ id: 'r_earlier01', uid, slug, status: 'finished', cost: 40, budgetUsd: 50, createdAt: new Date(Date.now() - 3600e3).toISOString(), steps: [], pending: [], events: [], seq: 0 });
-    assert.deepEqual((await pass()).pass.claude, { included: 50, used: 40, left: 10 });
+    assert.deepEqual((await pass()).pass.tokens, { included: 5000, used: 4000, left: 1000, held: 0, usedUp: false });
 
     const run = async () => {
       const r = await me.post(`/api/apps/${slug}/runs`, { steps: ['hosting'] });
@@ -189,26 +191,26 @@ test('runs spend the Claude time on the pass, and removing the app keeps the cou
       return r;
     };
     let r = await run();
-    assert.equal(r.body.budgetUsd, 10, 'the run gets what is left, not the usual $15');
-    assert.equal(client.calls.find((c) => c[0] === 'sessions.create')[1].budget.max_list_cost.amount, '1000', 'Claude is told the same cap');
+    assert.equal(r.body.budgetTokens, 1000, 'the run gets what is left, not the usual 1,500 tokens');
+    assert.equal(client.calls.find((c) => c[0] === 'sessions.create')[1].budget.max_list_cost.amount, '1000', 'the session gets the same cap, in cents');
     r = await run();
-    assert.equal(r.body.budgetUsd, 5);
-    assert.deepEqual((await pass()).pass.claude, { included: 50, used: 50, left: 0 });
+    assert.equal(r.body.budgetTokens, 500);
+    assert.deepEqual((await pass()).pass.tokens, { included: 5000, used: 5000, left: 0, held: 0, usedUp: true });
     r = await run();
     assert.equal(r.status, 402);
-    assert.match(r.body.error, /\$50 of Claude time .* is used up/);
+    assert.match(r.body.error, /The 5,000 tokens that came with this app's Launch Pass are used up/);
 
-    // Removing the app and importing it again doesn't reset the Claude time.
+    // Removing the app and importing it again doesn't reset the tokens.
     assert.equal((await me.del(`/api/apps/${slug}`)).status, 200);
     await me.call('POST', '/api/import/zip?name=invoicely.zip', zip, { 'content-type': 'application/zip' });
-    assert.deepEqual((await pass()).pass.claude, { included: 50, used: 50, left: 0 });
+    assert.deepEqual((await pass()).pass.tokens, { included: 5000, used: 5000, left: 0, held: 0, usedUp: true });
 
     // Another pass adds the same again.
     r = await me.post(`/api/apps/${slug}/pass`);
     assert.equal(r.status, 200, r.text);
     stripe.pay(stripe.last().id);
     await back(stripe.last().id);
-    assert.deepEqual((await pass()).pass.claude, { included: 100, used: 50, left: 50 });
+    assert.deepEqual((await pass()).pass.tokens, { included: 10000, used: 5000, left: 5000, held: 0, usedUp: false });
   } finally {
     await t.stop();
   }

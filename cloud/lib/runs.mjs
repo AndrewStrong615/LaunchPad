@@ -1,10 +1,12 @@
 // Launch runs: one Claude Managed Agents session per run. This server starts
 // the session (code mounted, keys in a vault), follows its event stream,
-// carries out Liftoff tools, and holds Claude's questions and approval
-// requests for the user, who answers them in the web app.
+// carries out Liftoff tools, and holds the assistant's questions and approval
+// requests for the user, who answers them in the web app. The user sees the
+// assistant by its Liftoff name, the run's mode and tokens (lib/brand.mjs).
 import crypto from 'node:crypto';
 import { STEPS, stepsFor } from '../../lib/catalog.mjs';
-import { DEFAULT_MODEL, EFFORT, MODELS, kickoff } from './agent.mjs';
+import { DEFAULT_MODEL, EFFORT, MODELS, kickoff, modelFor, tierOf } from './agent.mjs';
+import { DEFAULT_TOKENS_PER_USD, fromTokens, toTokens, tokenWord } from './brand.mjs';
 import { sandboxEnvPlan, syncVault } from './accounts.mjs';
 import { githubToken } from './importer.mjs';
 import { zipDirectory } from './archive.mjs';
@@ -26,8 +28,8 @@ export const fromCents = (amount) => {
   return amount != null && amount !== '' && Number.isFinite(n) ? n / 100 : null;
 };
 
-// What the web app shows for a run.
-export function publicRun(run, after = 0) {
+// What the web app shows for a run: its mode, not the model, and tokens, not dollars.
+export function publicRun(run, after = 0, rate = DEFAULT_TOKENS_PER_USD) {
   return {
     id: run.id,
     slug: run.slug,
@@ -36,12 +38,12 @@ export function publicRun(run, after = 0) {
     mode: run.mode,
     branch: run.branch || null,
     note: run.note || null,
-    model: run.model || null,
+    tier: tierOf(run.model),
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
     endedAt: run.endedAt || null,
-    cost: run.cost ?? null,
-    budgetUsd: run.budgetUsd,
+    tokens: toTokens(run.cost, rate),
+    budgetTokens: toTokens(run.budgetUsd, rate),
     pending: run.pending,
     pr: run.pr || null,
     outputs: run.outputs || [],
@@ -67,7 +69,7 @@ export class RunManager {
   readiness() {
     const { config } = this.ctx;
     if (!this.client || !config.anthropic.configured) return { ok: false, why: 'The server has no Anthropic API key (ANTHROPIC_API_KEY).' };
-    if (!config.anthropic.agentId || !config.anthropic.environmentId) return { ok: false, why: 'The Claude agent is not set up yet. Check the server log, or run `npm run setup` in cloud/.' };
+    if (!config.anthropic.agentId || !config.anthropic.environmentId) return { ok: false, why: 'Cloud runs are not set up on this server yet. Check the server log, or run `npm run setup` in cloud/.' };
     return { ok: true };
   }
 
@@ -108,21 +110,30 @@ export class RunManager {
   defaultModel(uid = null) {
     const mine = uid ? this.ctx.store.getUser(uid)?.prefs?.model : null;
     if (mine && MODELS.some((m) => m.id === mine)) return mine;
-    const want = this.ctx.config.runModel;
-    return MODELS.some((m) => m.id === want) ? want : DEFAULT_MODEL;
+    return modelFor(this.ctx.config.runModel) || DEFAULT_MODEL;
   }
 
-  // Whether any of this user's runs still has a Claude session going (or paused at its budget).
+  get name() {
+    return this.ctx.config.assistant;
+  }
+
+  get rate() {
+    return this.ctx.config.tokensPerUsd;
+  }
+
+  // Whether any of this user's runs still has a session going (or paused at its budget).
   hasOpenRuns(uid) {
     return this.ctx.store.allRuns((r) => r.uid === uid).some((r) => OPEN.has((this.live.get(r.id) || r).status));
   }
 
+  // tier: the mode the person picked (cruise, boost), or their default.
   // budgetUsd: what this run may spend (the Launch Pass can lower it).
-  async start(uid, slug, { steps = [], note = '', model = null, budgetUsd = null } = {}) {
+  async start(uid, slug, { steps = [], note = '', tier = null, budgetUsd = null } = {}) {
     const ready = this.readiness();
     if (!ready.ok) throw new HttpError(503, ready.why);
     const { store, config } = this.ctx;
-    if (model && !MODELS.some((m) => m.id === model)) throw new HttpError(400, `Pick one of these models: ${MODELS.map((m) => m.label).join(', ')}.`);
+    const model = tier ? modelFor(tier) : null;
+    if (tier && !model) throw new HttpError(400, `Pick one of these modes: ${MODELS.map((m) => m.label).join(', ')}.`);
     const state = store.loadApp(uid, slug);
     if (!state) throw new HttpError(404, 'No such app');
 
@@ -251,7 +262,7 @@ export class RunManager {
         } catch (e) {
           if (stopped) break;
           if (attempt >= 6) {
-            this.push(run, { kind: 'note', text: 'Lost touch with Claude for a while. Open the run again to reconnect.' });
+            this.push(run, { kind: 'note', text: `Lost touch with ${this.name} for a while. Open the run again to reconnect.` });
             run.disconnected = true;
             this.save(run);
             break;
@@ -345,7 +356,7 @@ export class RunManager {
     switch (ev.type) {
       case 'user.message': {
         const text = textOf(ev.content);
-        if (!run.events.some((e) => e.kind === 'kickoff')) this.push(run, { id: ev.id, at, kind: 'kickoff', text: 'Claude got the launch brief', detail: clip(text, 4000) });
+        if (!run.events.some((e) => e.kind === 'kickoff')) this.push(run, { id: ev.id, at, kind: 'kickoff', text: `${this.name} got the launch brief`, detail: clip(text, 4000) });
         else if (!run.events.some((e) => e.id === ev.id) && !run.events.some((e) => e.kind === 'you' && e.text === text && !e.id)) this.push(run, { id: ev.id, at, kind: 'you', text: clip(text, 4000) });
         break;
       }
@@ -388,7 +399,7 @@ export class RunManager {
         run.disconnected = false;
         break;
       case 'session.status_rescheduled':
-        this.push(run, { id: ev.id, at, kind: 'note', text: 'Claude hit a hiccup and is retrying' });
+        this.push(run, { id: ev.id, at, kind: 'note', text: `${this.name} hit a hiccup and is retrying` });
         break;
       case 'session.status_idle':
         this.onIdle(run, ev, at);
@@ -408,7 +419,7 @@ export class RunManager {
         break;
       }
       case 'agent.thread_context_compacted':
-        this.push(run, { id: ev.id, at, kind: 'note', text: 'Claude summarized its notes to keep going' });
+        this.push(run, { id: ev.id, at, kind: 'note', text: `${this.name} summarized its notes to keep going` });
         break;
       default:
         break;
@@ -425,21 +436,21 @@ export class RunManager {
     this.refreshCost(run);
     if (why === 'budget_reached') {
       run.status = 'budget';
-      this.push(run, { id: ev.id, at, kind: 'status', text: `Paused at the $${run.budgetUsd} budget for this run` });
+      this.push(run, { id: ev.id, at, kind: 'status', text: `Paused at this run's budget of ${tokenWord(toTokens(run.budgetUsd, this.rate))}` });
       return;
     }
     if (why === 'retries_exhausted' || why === 'refusal') {
       run.status = 'failed';
-      run.error = why === 'refusal' ? 'Claude declined to continue this run.' : 'Claude kept hitting errors and stopped.';
+      run.error = why === 'refusal' ? `${this.name} declined to continue this run.` : `${this.name} kept hitting errors and stopped.`;
       run.endedAt = at;
       this.push(run, { id: ev.id, at, kind: 'error', text: run.error });
       return;
     }
-    // end_turn: Claude finished (or was interrupted).
+    // end_turn: the assistant finished (or was interrupted).
     run.status = run.stopRequested ? 'stopped' : 'finished';
     run.endedAt = at;
     run.stopRequested = false;
-    this.push(run, { id: ev.id, at, kind: 'status', text: run.status === 'stopped' ? 'Stopped' : 'Claude finished. Send a message to keep going.' });
+    this.push(run, { id: ev.id, at, kind: 'status', text: run.status === 'stopped' ? 'Stopped' : `${this.name} finished. Send a message to keep going.` });
     if (run.mode === 'upload') this.collectOutputs(run).catch(() => {});
     this.ctx.store.updateApp(run.uid, run.slug, (s) => s.log.push({ at, msg: `Cloud run ${run.status}` }));
   }
@@ -578,7 +589,7 @@ export class RunManager {
     const msg = String(text || '').trim().slice(0, 8000);
     if (!msg) throw new HttpError(400, 'Type a message');
     if (!run.sessionId) throw new HttpError(409, 'This run never started.');
-    if (run.status === 'needs-you') throw new HttpError(409, 'Answer what Claude asked first.');
+    if (run.status === 'needs-you') throw new HttpError(409, `Answer what ${this.name} asked first.`);
     if (run.status === 'budget') throw new HttpError(409, 'This run is paused at its budget. Raise the budget to keep going.');
     if (run.status === 'failed' && !run.sessionId) throw new HttpError(409, 'This run failed before it started.');
     this.live.set(run.id, run);
@@ -630,11 +641,12 @@ export class RunManager {
     return run;
   }
 
-  // limit(add): how much of `add` is allowed (the Launch Pass's Claude time).
-  async raiseBudget(uid, slug, id, addUsd, limit = (n) => n) {
+  // addTokens: what the person adds, in tokens (lib/brand.mjs).
+  // limit(add): how much of `add` dollars is allowed (the Launch Pass's tokens).
+  async raiseBudget(uid, slug, id, addTokens, limit = (n) => n) {
     const run = this.must(uid, slug, id);
-    let add = Number(addUsd);
-    if (!Number.isFinite(add) || add < 1 || add > 100) throw new HttpError(400, 'Add between $1 and $100.');
+    let add = fromTokens(addTokens, this.rate);
+    if (!Number.isFinite(add) || add < 1 || add > 100) throw new HttpError(400, `Add between ${tokenWord(toTokens(1, this.rate))} and ${tokenWord(toTokens(100, this.rate))}.`);
     if (run.status !== 'budget') throw new HttpError(409, 'This run is not paused at its budget.');
     add = limit(add);
     this.live.set(run.id, run);
@@ -642,7 +654,7 @@ export class RunManager {
     await this.client.beta.sessions.update(run.sessionId, { budget: { type: 'limit', max_list_cost: { amount: toCents(next), currency: 'USD' } } });
     run.budgetUsd = next;
     run.status = 'running';
-    this.push(run, { kind: 'you', text: `Raised the budget to $${next.toFixed(2)}` });
+    this.push(run, { kind: 'you', text: `Raised the budget to ${tokenWord(toTokens(next, this.rate))}` });
     this.save(run);
     this.ensureFollowing(run);
     return run;

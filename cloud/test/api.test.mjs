@@ -244,16 +244,23 @@ test('a cloud run: Claude calls Liftoff tools, asks for approval and a choice, a
 
   r = await me.get('/api/me');
   assert.equal(r.body.claude.ok, true);
-  assert.equal(r.body.models.default, 'claude-sonnet-5-5');
-  assert.deepEqual(r.body.models.choices.map((m) => m.id), ['claude-sonnet-5-5', 'claude-opus-5-5']);
+  // People see Pilot, two modes and tokens: no model ids, no dollars.
+  assert.equal(r.body.assistant.name, 'Pilot');
+  assert.equal(r.body.tiers.default, 'cruise');
+  assert.deepEqual(r.body.tiers.choices.map((m) => [m.id, m.label]), [['cruise', 'Cruise'], ['boost', 'Boost']]);
+  assert.equal(r.body.tiers.strongest, 'boost');
+  assert.deepEqual([r.body.limits.runBudgetTokens, r.body.limits.topUpTokens], [1500, 1000]);
+  assert.doesNotMatch(r.text, /claude-|sonnet|opus|Usd/i);
   r = await me.post('/api/apps/invoicely/runs', { steps: ['nope'] });
   assert.equal(r.status, 400);
-  r = await me.post('/api/apps/invoicely/runs', { steps: ['hosting'], model: 'claude-mystery-1' });
+  r = await me.post('/api/apps/invoicely/runs', { steps: ['hosting'], tier: 'warp' });
   assert.equal(r.status, 400);
-  assert.match(r.body.error, /Claude Sonnet 5\.5, Claude Opus 5\.5/);
+  assert.match(r.body.error, /Cruise, Boost/);
   r = await me.post('/api/apps/invoicely/runs', { steps: ['hosting'], note: 'Use Vercel' });
   assert.equal(r.status, 200, r.text);
-  assert.equal(r.body.model, 'claude-sonnet-5-5');
+  assert.equal(r.body.tier, 'cruise');
+  assert.equal(r.body.model, undefined);
+  assert.equal(r.body.budgetTokens, 1500);
   const runId = r.body.id;
   assert.match(runId, /^r_/);
   r = await me.post('/api/apps/invoicely/runs', { steps: ['hosting'] });
@@ -277,8 +284,11 @@ test('a cloud run: Claude calls Liftoff tools, asks for approval and a choice, a
   r = await me.post(`${url}/answer`, { eventId: run.pending[0].id, text: 'invoicely.app' });
   assert.equal(r.status, 200);
 
-  run = await until(async () => { const x = (await me.get(url)).body; return x.status === 'finished' && x.cost !== null && x; });
-  assert.equal(run.cost, 2.5);
+  run = await until(async () => { const x = (await me.get(url)).body; return x.status === 'finished' && x.tokens !== null && x; });
+  assert.equal(run.tokens, 250, '$2.50 of Claude time is 250 tokens');
+  assert.equal(run.cost, undefined);
+  assert.ok(run.events.some((e) => e.text === 'Pilot got the launch brief'));
+  assert.ok(run.events.some((e) => e.text === 'Pilot finished. Send a message to keep going.'));
   assert.equal(session.approval, 'allow');
   assert.match(session.answer.text, /invoicely\.app/);
   assert.ok(session.plan.steps.some((s) => s.id === 'hosting'));
@@ -306,6 +316,7 @@ test('a cloud run: Claude calls Liftoff tools, asks for approval and a choice, a
   assert.equal(r.body.checklist.find((c) => c.id === 'pay-e2e').done, false);
   assert.equal(r.body.checklist.find((c) => c.id === 'host-deploy').by, 'verified');
   assert.equal(r.body.cloud.run.status, 'finished');
+  assert.equal(r.body.cloud.run.tokens, 250);
 
   // The session got the code, a vault and a budget, and never a real key.
   const create = client.calls.find((c) => c[0] === 'sessions.create')[1];
@@ -397,10 +408,10 @@ test('GitHub runs push a branch, open a pull request and copy keys to CI after a
   await call('POST', '/api/import/github', { url: 'https://github.com/acme/shop' });
   await call('POST', '/api/accounts/stripe', { values: { STRIPE_SECRET_KEY: 'sk_test_ci' } });
   await call('POST', '/api/accounts/vercel', { values: { VERCEL_TOKEN: 'vercel_tok' } });
-  r = await call('POST', '/api/apps/invoicely/runs', { steps: ['cicd'], model: 'claude-opus-5-5' });
+  r = await call('POST', '/api/apps/invoicely/runs', { steps: ['cicd'], tier: 'boost' });
   assert.equal(r.status, 200);
   assert.equal(r.body.mode, 'github');
-  assert.equal(r.body.model, 'claude-opus-5-5');
+  assert.equal(r.body.tier, 'boost');
   const url = `/api/apps/invoicely/runs/${r.body.id}`;
 
   let run = await until(async () => { const x = (await call('GET', url)).body; return x.pending[0]?.kind === 'secret' && x; });
@@ -485,17 +496,23 @@ test('a run that reaches its budget pauses, and continues when the user adds mor
   const url = `/api/apps/invoicely/runs/${r.body.id}`;
 
   let run = await until(async () => { const x = (await me.get(url)).body; return x.status === 'budget' && x; });
-  assert.equal(run.cost, 15.03);
+  assert.equal(run.tokens, 1503);
+  assert.ok(run.events.some((e) => e.text === "Paused at this run's budget of 1,500 tokens"));
   r = await me.post(`${url}/message`, { text: 'keep going' });
   assert.equal(r.status, 409);
-  r = await me.post(`${url}/budget`, { addUsd: 10 });
+  r = await me.post(`${url}/budget`, { addTokens: 50 });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /between 100 tokens and 10,000 tokens/);
+  r = await me.post(`${url}/budget`, { addTokens: 1000 });
   assert.equal(r.status, 200, r.text);
-  assert.equal(r.body.budgetUsd, 25.03);
+  assert.equal(r.body.budgetTokens, 2503);
+  assert.ok(r.body.events.some((e) => e.kind === 'you' && e.text === 'Raised the budget to 2,503 tokens'));
   const update = client.calls.find((c) => c[0] === 'sessions.update');
+  // Anthropic still gets dollars, in cents.
   assert.deepEqual(update[2].budget, { type: 'limit', max_list_cost: { amount: '2503', currency: 'USD' } });
 
-  run = await until(async () => { const x = (await me.get(url)).body; return x.status === 'finished' && x.cost === 18.4 && x; });
-  assert.equal(run.budgetUsd, 25.03);
+  run = await until(async () => { const x = (await me.get(url)).body; return x.status === 'finished' && x.tokens === 1840 && x; });
+  assert.equal(run.budgetTokens, 2503);
 });
 
 test('a message sent while Claude works shows once, even when the session echoes it right back', async (t) => {

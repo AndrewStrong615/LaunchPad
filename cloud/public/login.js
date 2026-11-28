@@ -21,6 +21,8 @@
     $('github').hidden = !opts.github;
     $('dev').hidden = !opts.dev;
     $('none').hidden = opts.github || opts.dev;
+    // The assistant's name, if this server gives it another one.
+    if (opts.assistant) for (const el of document.querySelectorAll('[data-ai]')) el.textContent = opts.assistant;
   } catch {
     $('none').hidden = false;
   }

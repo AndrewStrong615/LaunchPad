@@ -15,25 +15,34 @@ It lives next to the plugin and reuses it: the same detection, launch steps, rea
 - **Add an app** from a GitHub link (public, or private once you sign in with GitHub), from a list of your repos, or by uploading a zip. The code is unpacked safely (no `../` paths, no links, size and file limits), read with the plugin's detection, and scanned: App Store pre-scan and leaked keys.
 - **The Flight Board** for every app: launch steps, your tasks, release readiness, deploys, Pulse and "do this next", plus where the code came from, what the scan found, and per-app settings.
 - **Accounts**: each person adds a key once and all their apps use it. Keys are encrypted at rest (AES-256-GCM) and never sent back to the browser.
-- **Account settings** (your picture in the sidebar): profile from GitHub, Light, Dark or Match device (saved to the account and in the browser, so the page never flashes the wrong theme; the sun and moon button in the top bar switches it too), the model your runs start on, connections, signing out here or on every other device, and deleting the account. Deleting removes the apps, imported code, run history and keys, deletes the person's Anthropic vault, and takes back Liftoff Cloud's GitHub access. It waits until no run is going. The anonymous run records stay (the dialog says so).
+- **Account settings** (your picture in the sidebar): profile from GitHub, Light, Dark or Match device (saved to the account and in the browser, so the page never flashes the wrong theme; the sun and moon button in the top bar switches it too), the mode your runs start in, connections, signing out here or on every other device, and deleting the account. Deleting removes the apps, imported code, run history and keys, deletes the person's Anthropic vault, and takes back Liftoff Cloud's GitHub access. It waits until no run is going. The anonymous run records stay (the dialog says so).
 - **Verify and Pulse** run on the server against the live site and the connected services, through a fetch that refuses private and internal addresses.
 - **Liftoff runs the purchase test itself** for web apps on Stripe: its own browser signs up on the app's test-mode preview, buys Pro with Stripe's test card, checks Pro unlocks, cancels, and checks Pro locks again, with a screenshot of each step. Stripe's records for that checkout decide the result (see [The purchase test](#the-purchase-test)).
 - **Launch reports and the "Launch certified" badge**: a dated page anyone with the link can open, with every check, the evidence and a score, and a badge for the app's own site that links to it. It says "Launch certified" only when every required check ran on Liftoff's server and passed (see [Launch reports](#launch-reports-and-the-badge)).
-- **The Launch Pass**: one payment per app, through Liftoff's own Stripe account, opens cloud runs (with Claude time included), the purchase test and launch reports. Importing, the scan, verify, Pulse and the launch score stay free. Off until a Stripe key is set (see [The Launch Pass](#the-launch-pass)).
-- **Run records**: every cloud run leaves an anonymous record of the stack, how each step ended, the checklist before and after, the cost and the errors, so Liftoff can learn what works for which stack. Admins see success rates by stack, step and model, and what a step really costs (see [Run records](#run-records)).
-- **Cloud runs with Claude.** Pick steps (or all that are left), pick a model, add a note, start. Claude works in its own sandbox with a copy of the code and follows the plugin's skills. The run page shows what it's doing live; questions and approval requests appear as cards. GitHub apps get a branch and a draft pull request. Zips get a patch and an updated zip to download.
+- **The Launch Pass**: one payment per app, through Liftoff's own Stripe account, opens cloud runs (with tokens included), the purchase test and launch reports. Importing, the scan, verify, Pulse and the launch score stay free. Off until a Stripe key is set (see [The Launch Pass](#the-launch-pass)).
+- **Run records**: every cloud run leaves an anonymous record of the stack, how each step ended, the checklist before and after, the cost and the errors, so Liftoff can learn what works for which stack. Admins see success rates by stack, step, mode and model, and what a step really costs in dollars (see [Run records](#run-records)).
+- **Cloud runs with Pilot.** Pick steps (or all that are left), pick a mode, add a note, start. Pilot works in its own sandbox with a copy of the code and follows the plugin's skills. The run page shows what it's doing live; questions and approval requests appear as cards. GitHub apps get a branch and a draft pull request. Zips get a patch and an updated zip to download.
+
+## What people see: Pilot, modes and tokens
+
+People never see model names or what runs cost in dollars. `lib/brand.mjs` and `MODELS` in `lib/agent.mjs` decide what they see instead:
+
+- **Pilot**: the assistant goes by Liftoff's own name everywhere a person looks (the run thread, cards, buttons, the sign-in page, public reports). Set `LIFTOFF_ASSISTANT_NAME` to call it something else. Its prompt tells it the name, and to say plainly that it runs on Claude (made by Anthropic) if someone asks. Account settings says so in one line too, so no one is misled about what's underneath.
+- **Modes, not models**: *Cruise* (Claude Sonnet 5.5, the default) and *Boost* (Claude Opus 5.5, "thinks harder, uses about twice the tokens"). The API only takes and returns mode ids (`cruise`, `boost`); model ids stay on the server. A finished run offers "Try again with Boost".
+- **Tokens, not dollars**: Liftoff's own unit for what runs use. `LIFTOFF_TOKENS_PER_USD` (default 100) sets how many tokens make one dollar of model spend, so by default one token is one cent: the $15 run budget shows as 1,500 tokens, "add $10" as "Add 1,000 tokens", and the $50 on the Launch Pass as 5,000 tokens. Anthropic still gets dollars (in cents), and the Launch Pass price stays a real dollar charge on Stripe.
+- **Admins** still see dollars and the real model ("Cruise · Claude Sonnet 5.5") on the run records page.
 
 ## How a run works
 
 Runs use [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview): Anthropic runs the agent loop and a fresh sandbox per run, so people's code never runs on this server.
 
-- **Model**: runs use Claude Sonnet 5.5 by default, which handles this setup and coding work well for about half the cost of Opus. Each person can make Opus their own default in Account settings and can pick either model when they start a run. A finished or failed run offers "Try again with Opus" for the same steps. Both run at high effort. The choices are `MODELS` in `lib/agent.mjs`.
+- **Model**: runs use Claude Sonnet 5.5 by default (shown as *Cruise*), which handles this setup and coding work well for about half the cost of Opus (*Boost*). Each person can make Boost their own default in Account settings and can pick either mode when they start a run. A finished or failed run offers "Try again with Boost" for the same steps. Both run at high effort. The choices are `MODELS` in `lib/agent.mjs`.
 - **Code**: GitHub apps are mounted as a repository with the user's GitHub token, which also lets Claude push its branch. Zips are uploaded as a file.
 - **Keys**: each person's connected accounts are copied into their own Anthropic vault as credentials limited to that service's API host (for example `STRIPE_SECRET_KEY` only for `api.stripe.com`). The sandbox sees placeholders; the real key is swapped in only on the way to that host. Signing keys (App Store Connect, Google Play) never enter the sandbox: Claude asks to copy them into GitHub Actions secrets, the server does it directly, and only after the user approves it in the browser.
 - **Network**: the sandbox can reach package registries, GitHub and the connected services' APIs, nothing else. Web search and fetch are off.
 - **Liftoff tools**: Claude reads the plan, skills and templates and records steps, tasks, checks, deploys and settings through tools this server carries out (`liftoff_plan`, `liftoff_step`, `liftoff_verify`, …), so the Flight Board updates as it works and checks that need real keys run here. Checklist items the server can prove can only be ticked by `verify`. That includes the purchase flow test for web apps on Stripe: the sandbox can't open Stripe Checkout, so Claude calls `liftoff_prove_purchase` and Liftoff's own browser runs it, or the test runs in the app's CI and `verify` finds it. Either way Stripe's records decide (a paid test Checkout on the app, then a cancellation, with the app's webhook accepting both).
 - **Asking first**: Claude asks (`ask_user`) before anything that spends money, changes DNS, goes live, submits to a store or deletes something. Commands the sandbox's safety check is unsure about wait for an Allow or Decline.
-- **Budget**: every run has a spending cap (`LIFTOFF_RUN_BUDGET_USD`, default $15). A run that reaches it pauses, and the user can add $10 and continue. The run page shows what each run cost.
+- **Budget**: every run has a spending cap (`LIFTOFF_RUN_BUDGET_USD`, default $15, shown as 1,500 tokens). A run that reaches it pauses, and the user can add 1,000 tokens ($10) and continue. The run page shows what each run used, in tokens.
 - **What runs cost** (rough, before real usage data): on Sonnet 5.5, about $0.50 to $2.50 for one step and $10 to $30 for a full launch; Opus 5.5 costs about twice that. Scans, the Flight Board, verify and Pulse don't use Claude. Once runs happen, the [run records](#run-records) page shows the real cost per run and per step.
 - **Restarts**: run state is saved after every event. After a restart the server picks each run up where it left off, handling each event once.
 
@@ -70,11 +79,11 @@ Liftoff Cloud charges once per app for the parts that cost money to run or that 
 
 | Free | With the Launch Pass |
 | --- | --- |
-| Import from GitHub or a zip, the App Store pre-scan and leaked keys, verify, Pulse, the Flight Board, the launch score and the top problems found | Cloud runs with Claude, with `LIFTOFF_PASS_CLAUDE_USD` of Claude time included (default $50); Liftoff's purchase test; launch reports and the "Launch certified" badge |
+| Import from GitHub or a zip, the App Store pre-scan and leaked keys, verify, Pulse, the Flight Board, the launch score and the top problems found | Cloud runs with Pilot, with `LIFTOFF_PASS_CLAUDE_USD` of Claude time included (default $50, shown as 5,000 tokens); Liftoff's purchase test; launch reports and the "Launch certified" badge |
 
 - **Buying**: the Launch Pass card on the app's page (or the button that replaces *Start the launch*) opens Stripe Checkout for `LIFTOFF_PASS_USD` (default $149; promotion codes are allowed). It's a one-time payment on Liftoff's own Stripe account, not the person's.
 - **Granting**: when the person comes back from Checkout, the server reads that session from Stripe and grants the pass if it's theirs and paid. Stripe's webhook (`POST /billing/stripe-webhook`, signature checked with `LIFTOFF_STRIPE_WEBHOOK_SECRET`) grants it too, for when the tab was closed or the payment cleared later. Each checkout counts once.
-- **Claude time**: a run's budget is the usual per-run budget or what's left on the pass, whichever is less, and raising a paused run's budget stops at what's left. Open runs count at their budget, so two runs can't overspend. When it's used up, buying another pass adds the same amount again. Removing an app keeps what its runs cost counted against its pass, so importing it again doesn't reset it.
+- **Tokens on the pass**: a run's budget is the usual per-run budget or what's left on the pass, whichever is less, and raising a paused run's budget stops at what's left. Open runs count at their budget, so two runs can't overspend (the pass card shows that part as "held for the run going now"). When it's used up, buying another pass adds the same amount again. Removing an app keeps what its runs cost counted against its pass, so importing it again doesn't reset it.
 - **Free accounts**: GitHub logins in `LIFTOFF_FREE_LOGINS` get every pass free (for the team and testers).
 - **Records**: passes live in `users/<uid>/billing.json` and go when the account is deleted. Every checkout and payment is also appended to `<data>/billing/log.jsonl` (user id, app, Stripe session, amount; no names or emails) for the books and the free-scan-to-pass numbers.
 
@@ -128,8 +137,10 @@ The blueprint uses the Starter instance because Render disks need a paid instanc
 | `LIFTOFF_AGENT_ID`, `LIFTOFF_ENVIRONMENT_ID` | Use an agent and environment you manage yourself instead of the ones the server creates. |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | GitHub sign-in (scopes `repo read:user`, to import private repos, push branches and open pull requests). |
 | `LIFTOFF_DEV_LOGIN=1` | One-click local sign-in. Ignored when `NODE_ENV=production`. |
-| `LIFTOFF_RUN_BUDGET_USD` | Spending cap per run (default 15). |
-| `LIFTOFF_RUN_MODEL` | The model runs use when the person doesn't pick one: `claude-sonnet-5-5` (default) or `claude-opus-5-5`. |
+| `LIFTOFF_RUN_BUDGET_USD` | Spending cap per run, in dollars of model spend (default 15). |
+| `LIFTOFF_RUN_MODEL` | The mode runs use when the person doesn't pick one: `cruise` (default) or `boost` (a model id like `claude-opus-5-5` works too). |
+| `LIFTOFF_ASSISTANT_NAME` | What people call the assistant (default `Pilot`). Letters, digits, spaces and `.'-`, up to 24 characters. |
+| `LIFTOFF_TOKENS_PER_USD` | Tokens shown for each dollar of model spend (default 100, so one token is one cent). |
 | `LIFTOFF_MAX_ACTIVE_RUNS` | Runs one person can have going at once (default 3). |
 | `LIFTOFF_MAX_UPLOAD_MB`, `LIFTOFF_MAX_SOURCE_MB`, `LIFTOFF_MAX_SOURCE_FILES` | Limits for uploads and unpacked code (50 MB, 200 MB, 40,000 files). |
 | `LIFTOFF_EXTRA_HOSTS` | More hosts the sandbox may reach, comma-separated. |
@@ -138,7 +149,7 @@ The blueprint uses the Starter instance because Render disks need a paid instanc
 | `LIFTOFF_STRIPE_SECRET_KEY` | Liftoff's own Stripe secret key, for selling the Launch Pass. Unset turns billing off and everything is free. |
 | `LIFTOFF_STRIPE_WEBHOOK_SECRET` | The signing secret of the Stripe webhook at `/billing/stripe-webhook`. |
 | `LIFTOFF_PASS_USD` | The Launch Pass price in US dollars (default 149). |
-| `LIFTOFF_PASS_CLAUDE_USD` | Claude time included with each pass, in US dollars of model spend (default 50). |
+| `LIFTOFF_PASS_CLAUDE_USD` | Claude time included with each pass, in US dollars of model spend (default 50, shown as 5,000 tokens). |
 | `LIFTOFF_FREE_LOGINS` | GitHub logins that get every pass free, comma-separated. |
 | `LIFTOFF_ADMIN_LOGINS` | GitHub logins that can see the run records, comma-separated. If an admin renames their GitHub account, update this. |
 
@@ -159,8 +170,9 @@ cloud/
   lib/
     app.mjs           routes: sign-in, pages, JSON API
     runs.mjs          runs: sessions, event stream, approvals, questions
-    tools.mjs         the Liftoff tools Claude calls, carried out here
-    agent.mjs         the agent's prompt, tools and sandbox network
+    tools.mjs         the Liftoff tools the assistant calls, carried out here
+    agent.mjs         the agent's prompt, tools, modes and sandbox network
+    brand.mjs         what people see: the assistant's name and tokens
     provision.mjs     creates/updates the agent and environment
     importer.mjs      GitHub and zip import, scans
     accounts.mjs      per-user accounts and the Anthropic vault
@@ -169,7 +181,7 @@ cloud/
     safe-fetch.mjs    fetch that refuses private addresses (verify, Pulse)
     proof.mjs         the purchase test: queue, Stripe cancel, screenshots, result
     report.mjs        launch reports: certification, the public page, the badge
-    billing.mjs       the Launch Pass: Stripe Checkout, webhook, Claude time
+    billing.mjs       the Launch Pass: Stripe Checkout, webhook, tokens
     records.mjs       run records: one per run, scrubbed, and the admin numbers
     store.mjs         file storage
     crypto.mjs, http.mjs, config.mjs

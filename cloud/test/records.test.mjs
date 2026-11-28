@@ -117,7 +117,7 @@ test('a run paused at its budget is recorded, and brought up to date when it fin
   });
   const { t: srv, me, slug, record, run } = await setup({ anthropic: client });
   t.after(() => srv.stop());
-  const id = await run({ steps: ['hosting'], model: 'claude-opus-5-5' }, (s) => s === 'budget');
+  const id = await run({ steps: ['hosting'], tier: 'boost' }, (s) => s === 'budget');
   let rec = record(id);
   assert.equal(rec.outcome, 'budget');
   assert.equal(rec.cost, 15);
@@ -125,7 +125,7 @@ test('a run paused at its budget is recorded, and brought up to date when it fin
   assert.equal(rec.stepsDone, 0);
   assert.equal(rec.model, 'claude-opus-5-5');
 
-  const r = await me.post(`/api/apps/${slug}/runs/${id}/budget`, { addUsd: 5 });
+  const r = await me.post(`/api/apps/${slug}/runs/${id}/budget`, { addTokens: 500 });
   assert.equal(r.status, 200, r.text);
   await until(async () => (await me.get(`/api/apps/${slug}/runs/${id}`)).body.status === 'finished' && record(id).cost === 18);
   rec = record(id);
@@ -185,7 +185,7 @@ test('admins get the numbers by stack, step and model, and every record as JSON 
   assert.equal(s.byStack.length, 1);
   assert.equal(s.byStack[0].label, 'Next.js · web');
   assert.equal(s.byStack[0].runs, 2);
-  assert.deepEqual(s.byModel.map((m) => [m.label, m.runs]), [['Claude Sonnet 5.5', 2]]);
+  assert.deepEqual(s.byModel.map((m) => [m.label, m.runs]), [['Cruise · Claude Sonnet 5.5', 2]], 'admins see the mode and the real model');
   const step = (id) => s.bySteps.find((x) => x.id === id);
   assert.deepEqual([step('database').label, step('database').tried, step('database').done, step('database').rate], ['Database', 1, 1, 100]);
   assert.deepEqual([step('payments').tried, step('payments').blocked, step('payments').rate], [1, 1, 0]);
@@ -222,6 +222,6 @@ test('the numbers: failing checks and errors are counted, open runs left out of 
   assert.deepEqual(s.errors, [{ text: 'Claude kept hitting errors and stopped.', n: 1 }]);
   assert.equal(s.byStack[0].label, 'Expo · android + ios');
   assert.deepEqual(s.byStack[0].topFailure, { id: 'pay-restore', title: 'Restore purchases works', n: 2 });
-  assert.equal(s.byModel[0].label, 'Claude Opus 5.5');
+  assert.equal(s.byModel[0].label, 'Boost · Claude Opus 5.5');
   assert.equal(s.recent[0].outcome, 'running');
 });

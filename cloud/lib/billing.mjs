@@ -2,7 +2,8 @@
 // Stripe account (not the person's), for the parts that cost money to run or
 // that only Liftoff can grant:
 //
-//   - cloud runs with Claude, with a set amount of Claude time included
+//   - cloud runs, with a set amount of tokens included (Claude time,
+//     counted in Liftoff's own unit: see lib/brand.mjs)
 //   - Liftoff's purchase test in its own browser
 //   - launch reports and the "Launch certified" badge
 //
@@ -17,14 +18,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { HttpError } from './http.mjs';
+import { toTokens, tokenWord } from './brand.mjs';
 
 const SESSION = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const KIND = 'launch_pass';
 const OPEN_RUN = new Set(['starting', 'running', 'needs-you', 'budget']);
 const MAX_SKEW_S = 300;
 
-export const PASS_INCLUDES = [
-  'Claude runs the launch steps in the cloud',
+export const passIncludes = (name) => [
+  `${name} runs the launch steps in the cloud`,
   'Liftoff’s own purchase test, with screenshots',
   'Launch reports and the “Launch certified” badge',
 ];
@@ -108,19 +110,39 @@ export class Billing {
     return !this.enabled || this.free(uid) || !!this.pass(uid, slug);
   }
 
-  // Claude time on the pass: what's included, what finished runs cost, and
-  // what open runs may still spend (their budget), so a new run never takes
-  // more than is left.
+  // Claude time on the pass, in dollars: what's included, what finished runs
+  // cost, and what open runs may still spend (their budget), so a new run
+  // never takes more than is left. used = spent + held, where held is what
+  // open runs may still spend. People see it in tokens (tokensOf).
   claudeTime(uid, slug) {
     const p = this.pass(uid, slug);
     if (!p) return null;
-    let used = p.spentBefore || 0;
+    let spent = p.spentBefore || 0;
+    let held = 0;
     for (const r of this.ctx.store.listRuns(uid, slug)) {
       const live = this.ctx.runs?.live?.get(r.id) || r;
-      used += OPEN_RUN.has(live.status) ? Math.max(live.cost ?? 0, live.budgetUsd ?? 0) : live.cost ?? 0;
+      const cost = live.cost ?? 0;
+      spent += cost;
+      if (OPEN_RUN.has(live.status)) held += Math.max(0, (live.budgetUsd ?? 0) - cost);
     }
     const included = p.claudeUsd;
-    return { included, used: money(used), left: money(Math.max(0, included - used)) };
+    const used = spent + held;
+    return { included, used: money(used), left: money(Math.max(0, included - used)), spent: money(spent), held: money(held) };
+  }
+
+  get rate() {
+    return this.ctx.config.tokensPerUsd;
+  }
+
+  // The pass's Claude time as people see it: tokens spent, tokens held for
+  // runs still going, and what's left.
+  tokensOf(t) {
+    const tokens = (usd) => toTokens(usd, this.rate);
+    return { included: tokens(t.included), used: tokens(t.spent), held: tokens(t.held), left: tokens(t.left), usedUp: t.left < 1 };
+  }
+
+  usedUpError(t) {
+    return new HttpError(402, `The ${tokenWord(toTokens(t.included, this.rate))} that came with this app's Launch Pass are used up.`);
   }
 
   // ---------- what the paid parts check ----------
@@ -133,25 +155,25 @@ export class Billing {
   // The budget a new run gets: the usual per-run budget, or what's left of
   // the pass's Claude time if that's less.
   runBudget(uid, slug) {
-    this.require(uid, slug, 'Running Claude in the cloud');
+    this.require(uid, slug, 'Running a launch in the cloud');
     const usual = this.ctx.config.runBudgetUsd;
     if (!this.enabled || this.free(uid)) return usual;
     const t = this.claudeTime(uid, slug);
-    if (t.left < 1) throw new HttpError(402, `The $${t.included} of Claude time that came with this app's Launch Pass is used up.`);
+    if (t.left < 1) throw this.usedUpError(t);
     return Math.min(usual, t.left);
   }
 
   // How much a paused run may add to its budget.
   raiseLimit(uid, slug, add) {
     if (!this.enabled || this.free(uid)) return add;
-    this.require(uid, slug, 'Running Claude in the cloud');
+    this.require(uid, slug, 'Running a launch in the cloud');
     const t = this.claudeTime(uid, slug);
-    if (t.left < 1) throw new HttpError(402, `The $${t.included} of Claude time that came with this app's Launch Pass is used up.`);
+    if (t.left < 1) throw this.usedUpError(t);
     return Math.min(add, t.left);
   }
 
   // When an app is removed, what its runs cost stays counted against its pass,
-  // so removing and importing it again doesn't reset the Claude time.
+  // so removing and importing it again doesn't reset its tokens.
   appRemoved(uid, slug) {
     const b = this.load(uid);
     const p = b.passes[slug];
@@ -170,10 +192,10 @@ export class Billing {
       enabled: true,
       unlocked: free || !!p,
       free,
-      price: { usd: this.cfg.passUsd, claudeUsd: this.cfg.claudeUsd },
-      includes: PASS_INCLUDES,
+      price: { usd: this.cfg.passUsd, tokens: toTokens(this.cfg.claudeUsd, this.rate) },
+      includes: passIncludes(this.ctx.config.assistant),
       testMode: /^(sk|rk)_test_/.test(this.cfg.secretKey),
-      pass: p ? { at: p.at, claude: this.claudeTime(uid, state.slug) } : null,
+      pass: p ? { at: p.at, tokens: this.tokensOf(this.claudeTime(uid, state.slug)) } : null,
     };
   }
 
@@ -199,7 +221,7 @@ export class Billing {
     if (!this.enabled) throw new HttpError(404, 'Payments are off on this server.');
     const state = this.ctx.store.loadApp(uid, slug);
     if (!state) throw new HttpError(404, 'No such app');
-    // Once the pass's Claude time is used up, another pass adds the same again.
+    // Once the pass's tokens are used up, another pass adds the same again.
     if (this.free(uid) || (this.pass(uid, slug) && this.claudeTime(uid, slug).left >= 1)) throw new HttpError(409, 'This app already has its Launch Pass.');
     const base = this.ctx.config.publicUrl;
     const session = await this.stripe('POST', 'checkout/sessions', {
@@ -208,7 +230,7 @@ export class Billing {
       'line_items[0][price_data][currency]': 'usd',
       'line_items[0][price_data][unit_amount]': String(Math.round(this.cfg.passUsd * 100)),
       'line_items[0][price_data][product_data][name]': 'Liftoff Launch Pass',
-      'line_items[0][price_data][product_data][description]': `For ${String(state.name).slice(0, 80)}: cloud runs with $${this.cfg.claudeUsd} of Claude time, the purchase test, and the launch report and badge.`,
+      'line_items[0][price_data][product_data][description]': `For ${String(state.name).slice(0, 80)}: cloud runs with ${this.ctx.config.assistant} and ${tokenWord(toTokens(this.cfg.claudeUsd, this.rate))}, the purchase test, and the launch report and badge.`,
       allow_promotion_codes: 'true',
       client_reference_id: uid,
       'metadata[kind]': KIND,
