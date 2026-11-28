@@ -44,6 +44,20 @@ export class GitHub {
     return { token: body.access_token, scope: body.scope || '' };
   }
 
+  // Takes back the access the user gave Liftoff Cloud on GitHub (the OAuth
+  // grant), so it no longer shows under their authorized apps.
+  async revokeGrant(token) {
+    if (!this.oauthEnabled || !token) return false;
+    const basic = Buffer.from(`${this.cfg.clientId}:${this.cfg.clientSecret}`).toString('base64');
+    const res = await this.fetch(`${this.cfg.api}/applications/${encodeURIComponent(this.cfg.clientId)}/grant`, {
+      method: 'DELETE',
+      headers: { accept: 'application/vnd.github+json', authorization: `Basic ${basic}`, 'content-type': 'application/json', 'user-agent': UA, 'x-github-api-version': '2022-11-28' },
+      body: JSON.stringify({ access_token: token }),
+      signal: AbortSignal.timeout(15000),
+    });
+    return res.status === 204 || res.status === 404;
+  }
+
   async api(token, pathname, { method = 'GET', body, accept = 'application/vnd.github+json', raw = false, timeout = 20000 } = {}) {
     const headers = { accept, 'user-agent': UA, 'x-github-api-version': '2022-11-28' };
     if (token) headers.authorization = `Bearer ${token}`;

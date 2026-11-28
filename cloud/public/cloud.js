@@ -1,6 +1,6 @@
 // Liftoff Cloud screens on top of the shared Flight Board front end
-// (board.js): adding apps, connecting accounts, and runs where Claude does
-// the launch steps in the cloud. A run reads like a messages thread: Claude's
+// (board.js): adding apps, connecting accounts, account settings, and runs
+// where Claude does the launch steps in the cloud. A run reads like a messages thread: Claude's
 // bubbles on the left, yours on the right, tool work folded into one line, and
 // Claude's questions and approvals as cards right where it asked.
 //
@@ -29,6 +29,9 @@
     search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>',
     shield: '<path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z"/><path d="m9 12 2 2 4-4"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+    logout: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="m10 17 5-5-5-5M15 12H4"/>',
+    devices: '<rect x="2" y="5" width="14" height="10" rx="1.5"/><path d="M6 19h6M9 15v4"/><rect x="17" y="9" width="5" height="10" rx="1.2"/>',
   });
 
   const LIVE = new Set(['starting', 'running', 'needs-you']);
@@ -255,6 +258,174 @@
         }) }, 'Disconnect'));
     }
     return h('button', { class: 'btn', onclick: () => keyDialog(a) }, icon('key'), 'Connect');
+  }
+
+  // ---------- account settings ----------
+
+  const THEMES = [
+    { id: 'system', label: 'Match device', icon: 'monitor' },
+    { id: 'light', label: 'Light', icon: 'sun' },
+    { id: 'dark', label: 'Dark', icon: 'moon' },
+  ];
+  const longDate = (iso) => (iso ? new Date(iso).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }) : '');
+  const meAvatar = (u, cls = '') => (u.avatar ? h('img', { class: `pic ${cls}`, src: u.avatar, alt: '' }) : h('span', { class: `pic ph ${cls}`, 'aria-hidden': 'true' }, (u.login || '?')[0].toUpperCase()));
+  const hasOpenRun = () => state.apps.some((a) => a.cloud?.run && OPEN.has(a.cloud.run.status));
+
+  async function savePrefs(change, done) {
+    try {
+      const r = await post('/api/me/prefs', change);
+      if (C.me) Object.assign(C.me, { prefs: r.prefs, models: r.models });
+      if (done) toast(done);
+    } catch (e) {
+      toast(e.message);
+    }
+    repaint();
+  }
+
+  // A small drawing of the app in that theme.
+  function themePreview(kind) {
+    const one = (k) => h('span', { class: `prev ${k}` },
+      h('span', { class: 'prev-side' }, h('span', { class: 'prev-mark' }), h('span', { class: 'prev-line' }), h('span', { class: 'prev-line short' }), h('span', { class: 'prev-line' })),
+      h('span', { class: 'prev-main' }, h('span', { class: 'prev-title' }), h('span', { class: 'prev-card' }), h('span', { class: 'prev-card' }, h('span', { class: 'prev-btn' }))));
+    return kind === 'system' ? h('span', { class: 'prev-split' }, one('light'), one('dark')) : one(kind);
+  }
+
+  function appearanceCard() {
+    const now = window.LiftoffTheme?.get() || 'system';
+    return h('section', { class: 'card narrow' },
+      h('div', { class: 'card-head' }, h('h2', {}, 'Appearance'), h('span', { class: 'end sub' }, 'Saved to your account')),
+      h('div', { class: 'card-body' },
+        h('div', { class: 'theme-opts', role: 'radiogroup', 'aria-label': 'Theme' }, THEMES.map((t) => h('label', { class: 'theme-opt spot' + (now === t.id ? ' on' : ''), key: t.id },
+          h('input', { type: 'radio', name: 'theme', value: t.id, checked: now === t.id, onchange: () => Board.setTheme(t.id) }),
+          themePreview(t.id),
+          h('span', { class: 'cap' }, icon(t.icon), h('span', {}, t.label), h('span', { class: 'tick', 'aria-hidden': 'true' }))))),
+        h('p', { class: 'small tip' }, now === 'system'
+          ? 'Follows your phone or computer: light by day, dark if your device is set to dark.'
+          : 'The sun and moon button at the top of each page switches it too.')));
+  }
+
+  function profileCard(me) {
+    const u = me.user;
+    const github = u.via === 'github';
+    return h('section', { class: 'card narrow profile' },
+      meAvatar(u, 'lg'),
+      h('div', { class: 'grow' },
+        h('h2', {}, u.name || u.login),
+        h('div', { class: 'meta' },
+          h('span', {}, `@${u.login}`),
+          h('span', { class: 'pill sm' }, github ? [icon('github'), 'GitHub sign-in'] : [icon('terminal'), 'Signed in on this machine']),
+          u.createdAt ? h('span', {}, `Joined ${longDate(u.createdAt)}`) : null,
+          h('span', {}, Board.plural(state.apps.length, 'app'))),
+        h('p', { class: 'small' }, github ? 'Your name and picture come from GitHub and update each time you sign in.' : 'This is the local developer account, for running Liftoff Cloud on your own machine.')),
+      github ? h('a', { class: 'btn quiet', href: `https://github.com/${encodeURIComponent(u.login)}`, target: '_blank', rel: 'noopener' }, 'GitHub profile', icon('external')) : null);
+  }
+
+  function runsCard(me) {
+    const choice = me.models.default;
+    return h('section', { class: 'card narrow' },
+      h('div', { class: 'card-head' }, h('h2', {}, 'Claude runs')),
+      h('div', { class: 'card-body' },
+        models().length ? [
+          h('div', { class: 'sec-head' }, h('span', { class: 'sec-title' }, 'Default model')),
+          h('div', { class: 'picker models', role: 'radiogroup', 'aria-label': 'Default model' }, models().map((m) => h('label', { class: 'pick spot' + (m.id === choice ? ' on' : ''), key: m.id },
+            h('input', { type: 'radio', name: 'default-model', value: m.id, checked: m.id === choice, onchange: () => { C.model = null; savePrefs({ model: m.id }, `New runs start on ${m.label}`); } }),
+            h('span', { class: 't' }, h('b', {}, m.label), h('span', { class: 'small' }, m.hint))))),
+          h('p', { class: 'small' }, 'New runs start on this model. You can still pick the other one when you start a run.'),
+        ] : null,
+        h('dl', { class: 'kv' },
+          h('div', {}, h('dt', {}, 'Budget per run'), h('dd', {}, usd(me.limits.runBudgetUsd))),
+          h('div', {}, h('dt', {}, 'Runs at once'), h('dd', {}, `Up to ${me.limits.maxRuns}`)),
+          h('div', {}, h('dt', {}, 'Cloud runs on this server'), h('dd', {}, me.claude.ok ? h('span', { class: 'pill good sm' }, 'Ready') : h('span', { class: 'small', title: me.claude.why }, 'Not set up yet'))))));
+  }
+
+  function connectionsCard(me) {
+    const connected = state.accounts.filter((a) => a.connected);
+    const gh = me.github;
+    const canPr = gh.signedIn && /\brepo\b/.test(gh.scope || '');
+    return h('section', { class: 'card narrow' },
+      h('div', { class: 'card-head' }, h('h2', {}, 'Connections')),
+      h('div', { class: 'card-body rows' },
+        h('div', { class: 'line' },
+          h('span', { class: 'tile' }, icon('github')),
+          h('div', { class: 'grow' }, h('div', { class: 'name' }, 'GitHub'),
+            h('div', { class: 'small' }, gh.signedIn ? `Signed in as @${me.user.login}. ${canPr ? 'Liftoff can import your repos, private ones too, and open pull requests.' : 'Liftoff can read your public repos.'}`
+              : gh.token ? 'Using the GitHub token you added under Accounts.' : 'Not connected. Public repos still import; add a GitHub token under Accounts for private ones.')),
+          gh.signedIn ? h('a', { class: 'btn quiet', href: 'https://github.com/settings/applications', target: '_blank', rel: 'noopener', title: 'See or take back the access you gave Liftoff Cloud' }, 'Manage on GitHub', icon('external'))
+            : h('span', { class: 'pill sm' + (gh.token ? ' good' : '') }, gh.token ? 'Token' : 'Not connected')),
+        h('div', { class: 'line' },
+          h('span', { class: 'tile' }, icon('key')),
+          h('div', { class: 'grow' }, h('div', { class: 'name' }, 'Service keys'),
+            h('div', { class: 'small' }, connected.length ? `${connected.length} of ${state.accounts.length} connected: ${connected.slice(0, 4).map((a) => a.label).join(', ')}${connected.length > 4 ? ` and ${connected.length - 4} more` : ''}.` : `None of ${state.accounts.length} connected yet. Stripe, hosting, analytics and the rest go here.`)),
+          h('button', { class: 'btn', type: 'button', onclick: () => go('accounts') }, 'Manage', icon('arrow')))));
+  }
+
+  function sessionsCard() {
+    return h('section', { class: 'card narrow' },
+      h('div', { class: 'card-head' }, h('h2', {}, 'Signing in')),
+      h('div', { class: 'card-body rows' },
+        h('div', { class: 'line' },
+          h('span', { class: 'tile' }, icon('logout')),
+          h('div', { class: 'grow' }, h('div', { class: 'name' }, 'This device'), h('div', { class: 'small' }, 'You stay signed in here for 30 days.')),
+          h('form', { method: 'post', action: '/auth/logout' }, h('button', { class: 'btn', type: 'submit' }, 'Sign out'))),
+        h('div', { class: 'line' },
+          h('span', { class: 'tile' }, icon('devices')),
+          h('div', { class: 'grow' }, h('div', { class: 'name' }, 'Other devices'), h('div', { class: 'small' }, 'Sign out everywhere else, like a shared or lost computer.')),
+          h('button', { class: 'btn', type: 'button', onclick: (e) => busy(e.currentTarget, async () => {
+            const r = await post('/api/me/sign-out-others');
+            toast(r.ended ? `Signed out of ${Board.plural(r.ended, 'other session')}` : 'You weren’t signed in anywhere else');
+          }) }, 'Sign out others'))));
+  }
+
+  function deleteDialog() {
+    const login = C.me.user.login;
+    const n = state.apps.length;
+    const dlg = h('dialog', { class: 'modal', 'aria-label': 'Delete your account' });
+    const form = h('form', { onsubmit: (e) => {
+      e.preventDefault();
+      const typed = e.currentTarget.elements.confirm.value;
+      busy(e.submitter, async () => {
+        const r = await api('/api/me', { method: 'DELETE', body: JSON.stringify({ confirm: typed }) });
+        if (!r) return;
+        try { sessionStorage.removeItem('lc-run'); } catch {}
+        location.href = r.githubRevoked === false ? '/login?deleted=github' : '/login?deleted=1';
+      });
+    } },
+    h('div', { class: 'modal-head' }, h('span', { class: 'head-tile bad' }, icon('trash')), h('div', {}, h('h2', {}, 'Delete your account?'),
+      h('p', { class: 'small' }, 'This can’t be undone. Liftoff Cloud deletes:'))),
+    h('ul', { class: 'list-tight' },
+      h('li', {}, n === 1 ? 'Your app, with its imported code and run history' : n ? `Your ${n} apps, with their imported code and run history` : 'Your apps, imported code and run history'),
+      h('li', {}, 'The keys you saved for Stripe, hosting and other services, here and in Claude’s vault'),
+      h('li', {}, C.me.github.signedIn ? 'Your GitHub sign-in, and the access you gave Liftoff Cloud' : 'Your settings and sign-ins')),
+    h('p', { class: 'small' }, 'Your repositories, pull requests and the services Claude set up stay as they are.'),
+    h('label', { class: 'field' }, h('span', {}, 'Type ', h('b', { class: 'mono' }, login), ' to confirm'),
+      h('input', { name: 'confirm', type: 'text', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off', 'aria-label': `Type ${login} to confirm`,
+        oninput: (e) => { e.currentTarget.form.querySelector('.btn.danger-solid').disabled = e.currentTarget.value.trim().toLowerCase() !== login.toLowerCase(); } })),
+    h('div', { class: 'acts' }, h('button', { class: 'btn quiet', type: 'button', onclick: () => dlg.close() }, 'Cancel'),
+      h('button', { class: 'btn danger-solid', type: 'submit', disabled: true }, icon('trash'), 'Delete account')));
+    dlg.append(form);
+    dlg.addEventListener('close', () => dlg.remove());
+    document.body.append(dlg);
+    dlg.showModal();
+  }
+
+  function dangerCard() {
+    const open = hasOpenRun();
+    return h('section', { class: 'card narrow danger-card' },
+      h('div', { class: 'card-head' }, h('h2', {}, 'Delete account')),
+      h('div', { class: 'card-body' },
+        h('div', { class: 'line' },
+          h('div', { class: 'grow' }, h('div', { class: 'small' }, open
+            ? 'A Claude run is still going. Stop it first, then you can delete your account.'
+            : 'Removes your apps, run history, saved keys and GitHub access from Liftoff Cloud. Your code and services stay as they are.')),
+          h('button', { class: 'btn danger', type: 'button', disabled: open, onclick: deleteDialog }, icon('trash'), 'Delete account…'))));
+  }
+
+  function settingsView() {
+    const head = h('div', { class: 'page-head narrow' }, h('div', {},
+      h('h1', {}, 'Account settings'),
+      h('p', {}, 'Your profile, how Liftoff Cloud looks, and what Claude runs start with.')));
+    if (!C.me) return [head, h('div', { class: 'card narrow empty' }, h('p', {}, 'Loading your settings…'))];
+    return [head, profileCard(C.me), appearanceCard(), runsCard(C.me), connectionsCard(C.me), sessionsCard(), dangerCard()];
   }
 
   // ---------- one app ----------
@@ -808,20 +979,33 @@
     unauthorized: () => { location.href = '/login'; },
     pollMs: () => (state.view === 'run' && C.run && LIVE.has(C.run.status) ? 2000 : 4000),
     load: async () => {
-      const me = api('/api/me').then((m) => { if (m) C.me = m; });
+      const me = api('/api/me').then((m) => {
+        if (!m) return;
+        C.me = m;
+        // Your saved theme follows you to a new browser, once per page load.
+        if (!C.themeSynced) {
+          C.themeSynced = true;
+          if (m.prefs?.theme && window.LiftoffTheme && m.prefs.theme !== window.LiftoffTheme.get()) window.LiftoffTheme.set(m.prefs.theme, { animate: false });
+        }
+      });
       const run = state.view === 'run' ? loadRun(false) : null;
       await Promise.all([me, run]);
       return true;
     },
     views: {
       add: { title: 'Add an app', render: addView },
+      settings: { title: 'Account settings', render: settingsView },
       run: { get title() { const a = appOf(C.slug); return a ? `${a.name} · Claude run` : 'Claude run'; }, render: runView, key: () => `${C.slug}:${C.loading ? 'loading' : C.run?.id || 'new'}` },
     },
     navExtra: () => h('button', { class: 'nav' + (state.view === 'add' ? ' on' : ''), onclick: () => go('add') }, icon('plus'), h('span', {}, 'Add an app')),
-    sideFoot: () => C.me ? h('div', { class: 'who' },
-      C.me.user.avatar ? h('img', { src: C.me.user.avatar, alt: '' }) : h('span', { class: 'ph' }, (C.me.user.login || '?')[0].toUpperCase()),
+    sideFoot: () => C.me ? h('button', { class: 'nav who' + (state.view === 'settings' ? ' on' : ''), type: 'button', title: 'Account settings', onclick: () => go('settings') },
+      meAvatar(C.me.user),
       h('span', { class: 'nm' }, C.me.user.login),
-      h('form', { method: 'post', action: '/auth/logout' }, h('button', { class: 'btn quiet', type: 'submit', title: 'Sign out' }, 'Sign out'))) : null,
+      h('span', { class: 'end' }, icon('settings'))) : null,
+    themeChanged: (pref) => {
+      C.themeSynced = true;
+      if (C.me?.prefs?.theme !== pref) savePrefs({ theme: pref });
+    },
     appBadge: (a) => {
       const r = a.cloud?.run;
       if (!r) return null;

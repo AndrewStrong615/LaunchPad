@@ -101,10 +101,18 @@ export class RunManager {
 
   // ---------- starting ----------
 
-  // The model runs use when the person doesn't pick one.
-  defaultModel() {
+  // The model runs use when the person doesn't pick one: their own default
+  // from Account settings, else the server's.
+  defaultModel(uid = null) {
+    const mine = uid ? this.ctx.store.getUser(uid)?.prefs?.model : null;
+    if (mine && MODELS.some((m) => m.id === mine)) return mine;
     const want = this.ctx.config.runModel;
     return MODELS.some((m) => m.id === want) ? want : DEFAULT_MODEL;
+  }
+
+  // Whether any of this user's runs still has a Claude session going (or paused at its budget).
+  hasOpenRuns(uid) {
+    return this.ctx.store.allRuns((r) => r.uid === uid).some((r) => OPEN.has((this.live.get(r.id) || r).status));
   }
 
   async start(uid, slug, { steps = [], note = '', model = null } = {}) {
@@ -138,7 +146,7 @@ export class RunManager {
       mode,
       branch: mode === 'github' ? `liftoff/launch-${day}-${crypto.randomBytes(2).toString('hex')}` : null,
       note: String(note || '').trim().slice(0, 1000) || null,
-      model: model || this.defaultModel(),
+      model: model || this.defaultModel(uid),
       createdAt: new Date().toISOString(),
       budgetUsd: config.runBudgetUsd,
       cost: null,
