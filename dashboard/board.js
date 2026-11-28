@@ -130,6 +130,27 @@ function icon(name, cls = '') {
   return span.firstChild;
 }
 
+// A service's own logo (dashboard/logos.js), or null when there isn't one.
+// Each use gets its own gradient ids, since an id that's on the page twice
+// can paint from a copy that's hidden.
+let logoUses = 0;
+function logo(id) {
+  const l = window.LiftoffLogos?.[id];
+  if (!l) return null;
+  const [vb, body] = l;
+  const [, , w, h] = vb.split(' ').map(Number);
+  const n = ++logoUses;
+  const span = document.createElement('span');
+  span.innerHTML = `<svg class="logo logo-${id}${w / h > 1.5 ? ' wide' : ''}" viewBox="${vb}" aria-hidden="true">${body.replace(/(id="|url\(#)([\w-]+)/g, `$1$2-${n}`)}</svg>`;
+  return span.firstChild;
+}
+const initials = (label) => label.split(/\s|\(/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+// The square in front of a service's name: its logo, else its initials.
+function serviceTile(a) {
+  const mark = logo(a.id);
+  return mark ? h('span', { class: 'tile brand' }, mark) : h('span', { class: 'tile' }, initials(a.label));
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(path, { ...opts, headers: { 'content-type': 'application/json', ...(opts.headers || {}) } });
   if (res.status === 401 && HOOKS.unauthorized) return hook('unauthorized');
@@ -337,7 +358,7 @@ function activity(entries, limit, showApp) {
 // ---------- accounts ----------
 function accountRows(accounts) {
   return h('div', { class: 'rows' }, accounts.filter(Boolean).map((a) => h('div', { class: 'line' },
-    h('span', { class: 'tile' }, a.label.split(/\s|\(/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase()),
+    serviceTile(a),
     h('div', { class: 'grow' }, h('div', { class: 'name' }, a.label), h('div', { class: 'small' }, a.connected ? `Connected ${a.connectedAt ? ago(a.connectedAt) : ''}`.trim() : a.note)),
     hook('accountAction', a) || (a.connected
       ? h('span', { class: 'pill good' }, icon('check'), 'Connected')
@@ -683,5 +704,5 @@ function start() {
   setTimeout(tick, hook('pollMs') || 4000);
 }
 
-window.Board = { configure, start, state, h, icon, api, mutate, go, render, refresh, toast, copy, ago, colorFor, avatar, host, plural, money, morph, repaint, setTheme, themeButton, PLATFORM, STEP_WORD, ICONS };
+window.Board = { configure, start, state, h, icon, logo, serviceTile, api, mutate, go, render, refresh, toast, copy, ago, colorFor, avatar, host, plural, money, morph, repaint, setTheme, themeButton, PLATFORM, STEP_WORD, ICONS };
 if (!document.body.hasAttribute('data-board-manual')) start();

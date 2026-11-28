@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import sodium from 'libsodium-wrappers';
+import { ACCOUNTS } from '../../lib/catalog.mjs';
 import { zipDirectory } from '../lib/archive.mjs';
 import { fakeAnthropic } from './fake-anthropic.mjs';
 import { FIXTURES, signIn, startTest, tarGz, treeEntries, until } from './helpers.mjs';
@@ -89,6 +90,19 @@ test('sign-in, origin checks and the plain API', async (t) => {
   r = await fetch(`${srv.base}/board.js`);
   assert.equal(r.status, 200);
   assert.match(await r.text(), /window\.Board/);
+
+  // Every service has its own logo, drawn from this server (the CSP allows no
+  // outside images) without style attributes (the CSP blocks those too), and
+  // the page loads them before board.js draws the account lists.
+  r = await fetch(`${srv.base}/logos.js`);
+  assert.equal(r.status, 200);
+  const logos = await r.text();
+  const win = {};
+  new Function('window', logos)(win);
+  assert.deepEqual(Object.keys(win.LiftoffLogos).sort(), Object.keys(ACCOUNTS).sort());
+  assert.doesNotMatch(logos, /style=|https?:/);
+  r = await me.get('/');
+  assert.match(r.text, /<script src="\/logos\.js"><\/script>\n<script src="\/board\.js">/);
 
   // Import a zip.
   const zip = zipDirectory(path.join(FIXTURES, 'next-saas'), { prefix: 'next-saas/' });
