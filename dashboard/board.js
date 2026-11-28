@@ -180,6 +180,8 @@ function ago(iso) {
 const PLATFORM = { web: 'Web', ios: 'iOS', android: 'Android' };
 
 function appStatus(a) {
+  const custom = hook('appStatus', a);
+  if (custom) return custom;
   if (a.readyForRelease) return h('span', { class: 'pill good' }, icon('check'), 'Ready for users');
   if (a.liveUrl) return h('span', { class: 'pill good' }, h('span', { class: 'd' }), 'Live');
   if (a.steps.some((s) => s.status === 'running')) return h('span', { class: 'pill run' }, h('span', { class: 'd' }), 'In progress');

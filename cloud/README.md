@@ -22,6 +22,7 @@ It lives next to the plugin and reuses it: the same detection, launch steps, rea
 - **Verify and Pulse** run on the server against the live site and the connected services, through a fetch that refuses private and internal addresses.
 - **Liftoff runs the purchase test itself** for web apps on Stripe: its own browser signs up on the app's test-mode preview, buys Pro with Stripe's test card, checks Pro unlocks, cancels, and checks Pro locks again, with a screenshot of each step. Stripe's records for that checkout decide the result (see [The purchase test](#the-purchase-test)).
 - **Launch reports and the "Launch certified" badge**: a dated page anyone with the link can open, with every check, the evidence and a score, and a badge for the app's own site that links to it. It says "Launch certified" only when every required check ran on Liftoff's server and passed (see [Launch reports](#launch-reports-and-the-badge)).
+- **Watching and alerts**: once an app is live, Liftoff checks the site every 5 minutes and runs every check again each day (plus the HTTPS certificate and the domain's expiry), opens an incident when something breaks and closes it when it's fixed, and tells the owner in Slack or Discord (see [Watching and alerts](#watching-and-alerts)).
 - **The Launch Pass**: one payment per app, through Liftoff's own Stripe account, opens cloud runs (with tokens included), the purchase test and launch reports. Importing, the scan, verify, Pulse and the launch score stay free. The tour's last step shows the price. Off until a Stripe key is set (see [The Launch Pass](#the-launch-pass)).
 - **Run records**: every cloud run leaves an anonymous record of the stack, how each step ended, the checklist before and after, the cost and the errors, so Liftoff can learn what works for which stack. Admins see success rates by stack, step, mode and model, and what a step really costs in dollars (see [Run records](#run-records)).
 - **Cloud runs with Pilot.** Pick steps (or all that are left), pick a mode, add a note, start. Pilot works in its own sandbox with a copy of the code and follows the plugin's skills. The run page shows what it's doing live; questions and approval requests appear as cards. GitHub apps get a branch and a draft pull request. Zips get a patch and an updated zip to download.
@@ -95,6 +96,17 @@ Liftoff Cloud charges once per app for the parts that cost money to run or that 
 
 To turn it on: in Stripe (test mode first), copy the secret key into `LIFTOFF_STRIPE_SECRET_KEY`; add a webhook endpoint at `https://<service>/billing/stripe-webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded` and copy its signing secret into `LIFTOFF_STRIPE_WEBHOOK_SECRET`. In test mode the card says so and Checkout takes the 4242 card. A refund in Stripe doesn't take the pass back yet.
 
+## Watching and alerts
+
+Once an app has a live address (the Deployments card, or a deploy Pilot records), Liftoff keeps checking it without anyone pressing a button. This is what Pro pays for (roadmap Phase 2). None of it uses the assistant.
+
+- **Uptime**: the live site, or its `health.path` when set, every `LIFTOFF_UPTIME_MINUTES` (default 5). Two failed checks in a row open a "down" incident, dated from the first one; the first good answer closes it. The app page's *Watching* card shows the last 24 hours as half-hour bars, uptime over 24 hours and 30 days, and the usual answer time. The overview and sidebar say *Down* while it is.
+- **Every check again**, once every `LIFTOFF_DAILY_CHECK_HOURS` (default 24): new code from GitHub when the branch moved (so a key pushed later is caught; skipped while a run is open), a full verify, Pulse, the HTTPS certificate (incident within 14 days of expiry or when browsers wouldn't trust it) and the domain's registration from RDAP (incident within 30 days; skipped for platform domains like `*.vercel.app`). A check that passed before and fails now opens an incident; one that never passed is still on the launch list, not news.
+- **Incidents** close by themselves when the problem goes away. Opening and closing shows in the app's activity. *Pause watching* stops the checks for that app and closes what's open without alerts.
+- **Alerts**: Account settings → *Alerts* takes a Slack incoming webhook or a Discord channel webhook (nothing else: the server posts to it). Liftoff sends a first message before saving it, then one message when an incident opens and one when it closes, at most 30 an hour per person. The address is stored encrypted with the person's keys and only its last four characters are shown back. Email alerts need a sending service and a domain, so they come later.
+- **Who is watched**: every app with a live address while payments are off; with payments on, `LIFTOFF_FREE_LOGINS`, and apps whose Launch Pass is under 30 days old (the 30 days of Pro that come with it). A monthly Pro plan comes next.
+- **Where it runs**: inside the web server, on a one-minute tick, up to 8 uptime checks and 2 daily checks at a time. Render runs one instance of a service with a disk and stops the old one before starting the new one, so nothing runs twice. Each app's record is `watch.json` beside its state (samples for 24 hours, daily totals for 90 days, the last 50 incidents). `LIFTOFF_WATCH=0` turns it all off. A database and a separate worker are only needed once the web app runs on more than one instance.
+
 ## Run records
 
 Every cloud run leaves a record in `<data>/records/runs/<run id>.json`. It's written when the run starts and brought up to date each time the run stops working (finished, stopped, failed or paused at its budget, again if it's picked up later). This is what Phase 3 of the roadmap learns from: which stacks and steps go well, why steps get stuck, and what a launch really costs.
@@ -118,7 +130,7 @@ Open `http://localhost:8787` (not 127.0.0.1: the address must match `PUBLIC_URL`
 
 ```
 ANTHROPIC_API_KEY=sk-ant-... npm run dev      # cloud runs too
-npm test                                      # 46 tests, no network needed
+npm test                                      # 81 tests, no network needed
 ```
 
 ## Deploy on Render
@@ -158,6 +170,9 @@ The blueprint uses the Starter instance because Render disks need a paid instanc
 | `LIFTOFF_PASS_USD` | The Launch Pass price in US dollars (default 149). |
 | `LIFTOFF_PASS_CLAUDE_USD` | Claude time included with each pass, in US dollars of model spend (default 50, shown as 5,000 tokens). |
 | `LIFTOFF_FREE_LOGINS` | GitHub logins that get every pass free, comma-separated. |
+| `LIFTOFF_WATCH` | `0` turns watching off (uptime checks, the daily checks and alerts). |
+| `LIFTOFF_UPTIME_MINUTES` | Minutes between uptime checks of a watched app (default 5). |
+| `LIFTOFF_DAILY_CHECK_HOURS` | Hours between runs of every check on a watched app (default 24). |
 | `LIFTOFF_ADMIN_LOGINS` | GitHub logins that can see the run records, comma-separated. If an admin renames their GitHub account, update this. |
 
 ## Security notes
@@ -166,7 +181,8 @@ The blueprint uses the Starter instance because Render disks need a paid instanc
 - Keys are encrypted with a key derived from `LIFTOFF_CLOUD_SECRET` and only decrypted on the server for verify, Pulse, the vault and GitHub secrets. They're never in the browser, the prompt or the sandbox.
 - Settings that end up in API URLs (PostHog host, Sentry org, …) are validated, so a key can never be sent to another host.
 - Repository text, command output and web pages are treated as data by the agent, and Claude's Liftoff tools can only touch the app the run belongs to.
-- Storage is plain files on one disk, sized for one instance. Run one instance; to scale out, move `lib/store.mjs` to a database first.
+- Storage is plain files on one disk, sized for one instance, and watching's schedule runs in that instance. Run one instance; to scale out, move `lib/store.mjs` to a database and the schedule to a worker first.
+- Watching reaches only public addresses (the same guard as verify, for the certificate check too), and alerts post only to Slack and Discord webhook addresses.
 
 ## Layout
 
@@ -192,6 +208,8 @@ cloud/
     report.mjs        launch reports: certification, the public page, the badge
     billing.mjs       the Launch Pass: Stripe Checkout, webhook, tokens
     records.mjs       run records: one per run, scrubbed, and the admin numbers
+    watch.mjs         watching: uptime, the daily checks, certificate and domain expiry, incidents
+    alerts.mjs        alerts to Slack or Discord when an incident opens or closes
     store.mjs         file storage
     crypto.mjs, http.mjs, config.mjs
   public/             the web app's pages (the Flight Board itself is ../dashboard)

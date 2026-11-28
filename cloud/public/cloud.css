@@ -934,3 +934,46 @@ button.link { background: none; border: 0; padding: 0; font: inherit; color: var
 .ob-plan .plan-price { margin-left: auto; font-size: 13px; color: var(--muted); }
 .ob-plan .plan-price b { font-size: 18px; font-weight: 660; color: var(--ink); letter-spacing: -.02em; }
 .pass-later { margin: 0 0 10px; color: var(--muted); }
+
+/* Watching (lib/watch.mjs): uptime bars, incidents and the daily check */
+.watch-what { margin: 10px 0 4px; color: var(--muted); }
+.watch-note { margin: 6px 0; color: var(--ink-2); }
+.watch.down { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bad) 35%, transparent), var(--shadow, none); }
+.watch-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 12px 0 10px; }
+.watch-facts .k { font-size: 12px; color: var(--muted); }
+.watch-facts .v { margin-top: 2px; font-size: 22px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--ink); }
+.watch-bars { display: grid; grid-template-columns: repeat(48, minmax(0, 1fr)); gap: 2px; height: 28px; }
+.watch-bars span { border-radius: 3px; background: var(--hover); }
+.watch-bars .up { background: var(--good-dot); }
+.watch-bars .part { background: var(--warn-dot); }
+.watch-bars .down { background: var(--bad-dot); }
+.watch-axis { display: flex; justify-content: space-between; margin: 4px 0 8px; color: var(--faint); }
+.watch-incidents { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.watch-incidents li { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--bad-soft); }
+.watch-incidents li > .i { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--bad); }
+.watch-incidents .name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.watch-incidents .small { color: var(--ink-2); overflow-wrap: anywhere; }
+.watch-lines { list-style: none; margin: 6px 0 8px; padding: 0; }
+.watch-lines li { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; font-size: 13px; color: var(--ink-2); }
+.watch-lines li > .i { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--good-dot); }
+.watch-lines li.bad > .i { color: var(--bad); }
+.watch-lines li.wait > .i { color: var(--faint); }
+.watch-history { margin: 4px 0 8px; font-size: 13px; }
+.watch-history summary { cursor: pointer; color: var(--muted); }
+.watch-history ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.watch-history li { display: flex; gap: 10px; padding: 4px 0; border-top: 1px solid var(--line-2); color: var(--ink-2); }
+.watch-history li .small { color: var(--muted); white-space: nowrap; }
+.watch .row .end { margin-left: auto; color: var(--muted); }
+@media (max-width: 560px) {
+  .watch-facts .v { font-size: 18px; }
+  .watch-bars { gap: 1px; height: 24px; }
+  .watch .row .end { margin-left: 0; width: 100%; }
+}
+.watch-alerts { margin: 2px 0 8px; color: var(--muted); }
+.alerts-form { margin-top: 10px; }
+.alerts-form .k { display: block; font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
+.alerts-card .line { margin-top: 10px; flex-wrap: wrap; }
+.watch-alerts .link { background: none; border: 0; padding: 0; font: inherit; color: var(--ink-2); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.watch-alerts .link:hover { color: var(--ink); }
+/* A watched site that's down: the sidebar's live dot turns red too. */
+.nav .end:has(.watch-down) .status-dot.live { background: var(--bad-dot); box-shadow: none; }

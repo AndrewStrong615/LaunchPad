@@ -98,6 +98,7 @@ export function createApp(ctx) {
         proof: ctx.proof.view(uid, state),
         report: reportView(ctx, uid, state),
         pass: ctx.billing.view(uid, state),
+        watch: ctx.watch.view(uid, state),
       },
     };
   }
@@ -235,7 +236,16 @@ export function createApp(ctx) {
         limits: { uploadMb: Math.round(config.maxUploadBytes / 1048576), runBudgetTokens: tokens(config.runBudgetUsd), topUpTokens: tokens(10), maxRuns: config.maxRunsPerUser },
         settings: CONFIG_KEYS,
         admin: ctx.records.isAdmin(user),
+        alerts: ctx.alerts.view(uid),
       });
+    }
+
+    // ----- Alerts (lib/alerts.mjs): where watching tells you something broke -----
+    if (parts[0] === 'me' && parts[1] === 'alerts') {
+      limit(`alerts:${uid}`, 20, 60000);
+      if (parts.length === 2 && M === 'POST') return ok(await ctx.alerts.set(uid, (await readJson(req)).url));
+      if (parts.length === 2 && M === 'DELETE') return ok(ctx.alerts.remove(uid));
+      if (parts[2] === 'test' && parts.length === 3 && M === 'POST') return ok(await ctx.alerts.test(uid));
     }
 
     // ----- Account settings -----
@@ -441,6 +451,20 @@ export function createApp(ctx) {
         const body = await readJson(req);
         const value = validateSetting(String(body.key || ''), body.value);
         return save((s) => setConfig(s, String(body.key), value || null));
+      }
+      if (rest[0] === 'watch' && M === 'POST') {
+        // Watching (lib/watch.mjs): pause or resume it, or check the site now.
+        if (rest.length === 1) {
+          const body = await readJson(req);
+          if (typeof body.paused !== 'boolean') throw new HttpError(400, 'paused is true or false.');
+          ctx.watch.setPaused(uid, slug, body.paused);
+          return ok(view(uid, store.loadApp(uid, slug)));
+        }
+        if (rest[1] === 'check' && rest.length === 2) {
+          limit(`watch:${uid}`, 10, 60000);
+          await ctx.watch.checkNow(uid, slug);
+          return ok(view(uid, store.loadApp(uid, slug)));
+        }
       }
       if (rest[0] === 'live' && rest.length === 1 && M === 'POST') {
         // Where an app that's already live runs, so the free Verify can check it.

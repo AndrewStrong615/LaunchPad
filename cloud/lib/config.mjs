@@ -86,6 +86,13 @@ export function loadConfig(env = process.env) {
     // GitHub logins that can read the run records (lib/records.mjs).
     adminLogins: (env.LIFTOFF_ADMIN_LOGINS || '').split(',').map((l) => l.trim().toLowerCase()).filter(Boolean),
     extraHosts: (env.LIFTOFF_EXTRA_HOSTS || '').split(',').map((h) => h.trim()).filter(Boolean),
+    // Watching launched apps (lib/watch.mjs): uptime every few minutes, every
+    // check again once a day. Runs inside this server, so it needs no worker.
+    watch: {
+      on: env.LIFTOFF_WATCH !== '0',
+      uptimeMinutes: positive(env.LIFTOFF_UPTIME_MINUTES, 5),
+      dailyHours: positive(env.LIFTOFF_DAILY_CHECK_HOURS, 24),
+    },
     // The Launch Pass, paid through Liftoff's own Stripe account. Off until the key is set.
     billing: {
       secretKey: env.LIFTOFF_STRIPE_SECRET_KEY || null,

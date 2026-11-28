@@ -812,6 +812,51 @@
           h('button', { class: 'btn', type: 'button', onclick: () => go('accounts') }, 'Manage', icon('arrow')))));
   }
 
+  // Alerts (lib/alerts.mjs): where Liftoff says a watched app broke. A Slack
+  // or Discord webhook for now; saving one sends a first message to it.
+  function alertsCard(me) {
+    const ch = me.alerts?.channel || null;
+    const save = (e) => {
+      e.preventDefault();
+      const url = e.currentTarget.elements.hook.value.trim();
+      if (!url) return;
+      busy(e.submitter, async () => {
+        const r = await post('/api/me/alerts', { url });
+        C.me.alerts = r;
+        toast(`Connected. Check ${r.channel.label} for Liftoff’s first message.`);
+        repaint();
+      });
+    };
+    const test = (e) => busy(e.currentTarget, async () => {
+      C.me.alerts = await post('/api/me/alerts/test');
+      toast(`Sent a test to ${ch.label}`);
+      repaint();
+    });
+    const remove = (e) => busy(e.currentTarget, async () => {
+      if (!confirm(`Stop sending alerts to ${ch.label}?`)) return;
+      C.me.alerts = await api('/api/me/alerts', { method: 'DELETE' });
+      toast('Alerts turned off');
+      repaint();
+    });
+    return h('section', { class: 'card narrow alerts-card' },
+      h('div', { class: 'card-head' }, h('h2', {}, 'Alerts'), h('span', { class: 'end sub' }, ch ? `To ${ch.label}` : 'Off')),
+      h('div', { class: 'card-body' },
+        h('p', { class: 'small' }, 'When Liftoff is watching an app and something breaks (the site goes down, a check stops passing, a certificate or domain is about to run out), it tells you here, and again when it’s fixed.'),
+        ch ? [
+          h('div', { class: 'line' },
+            h('span', { class: 'tile' }, icon('activity')),
+            h('div', { class: 'grow' }, h('div', { class: 'name' }, `${ch.label} webhook ending in …${ch.hint}`),
+              h('div', { class: 'small' }, ch.lastError ? `The last alert didn’t go through: ${ch.lastError}` : ch.lastSentAt ? `Last message ${ago(ch.lastSentAt)}` : `Added ${ago(ch.addedAt)}`)),
+            h('button', { class: 'btn', type: 'button', onclick: test }, 'Send a test'),
+            h('button', { class: 'btn quiet', type: 'button', onclick: remove }, 'Remove')),
+        ] : h('form', { class: 'alerts-form', onsubmit: save },
+          h('label', { class: 'k', for: 'alert-hook' }, 'Slack or Discord webhook'),
+          h('div', { class: 'row' },
+            h('input', { id: 'alert-hook', name: 'hook', class: 'in grow mono', type: 'url', autocomplete: 'off', spellcheck: 'false', placeholder: 'https://hooks.slack.com/services/…' }),
+            h('button', { class: 'btn primary', type: 'submit' }, 'Connect')),
+          h('p', { class: 'small tip' }, 'In Slack: add the Incoming Webhooks app and pick a channel. In Discord: channel settings, Integrations, New Webhook. Paste the address here; Liftoff sends a first message to check it.'))));
+  }
+
   function sessionsCard() {
     return h('section', { class: 'card narrow' },
       h('div', { class: 'card-head' }, h('h2', {}, 'Signing in')),
@@ -876,9 +921,9 @@
   function settingsView() {
     const head = h('div', { class: 'page-head narrow' }, h('div', {},
       h('h1', {}, 'Account settings'),
-      h('p', {}, 'Your profile, how Liftoff Cloud looks, and how your runs start.')));
+      h('p', {}, 'Your profile, how Liftoff Cloud looks, how your runs start, and where alerts go.')));
     if (!C.me) return [head, h('div', { class: 'card narrow empty' }, h('p', {}, 'Loading your settings…'))];
-    return [head, profileCard(C.me), appearanceCard(), runsCard(C.me), C.me.admin ? recordsCard() : null, connectionsCard(C.me), tourCard(), sessionsCard(), dangerCard()];
+    return [head, profileCard(C.me), appearanceCard(), runsCard(C.me), alertsCard(C.me), C.me.admin ? recordsCard() : null, connectionsCard(C.me), tourCard(), sessionsCard(), dangerCard()];
   }
 
   // ---------- run records (admins only) ----------
@@ -1193,6 +1238,89 @@
             h('a', { class: 'grow', href: x.url, target: '_blank', rel: 'noopener' }, `${longDay(x.at)} · score ${x.score}`),
             h('button', { class: 'btn sm ghost', title: 'Take this report down', 'aria-label': 'Take this report down', onclick: takeDown(x.id) }, icon('trash')))))) : null,
         latest ? h('p', { class: 'small report-down' }, h('button', { class: 'link', onclick: takeDown(latest.id) }, 'Take the newest report down')) : null));
+  }
+
+  // Watching (lib/watch.mjs): once the app is live, Liftoff checks the site
+  // every few minutes and runs every check again each day. What broke shows
+  // here as an incident until it's fixed.
+  const WATCH_WORD = { up: 'Up', down: 'Down', checking: 'Checking again', pending: 'Starting', off: 'Not watching' };
+  const WATCH_TONE = { up: 'good', down: 'bad', checking: 'warn', pending: 'run', off: '' };
+  const soon = (iso) => {
+    const s = Math.max(0, (Date.parse(iso) - Date.now()) / 1000);
+    if (s < 60) return 'in a moment';
+    if (s < 3600) return `in ${Math.round(s / 60)}m`;
+    return `in ${Math.round(s / 3600)}h`;
+  };
+  const span = (from, to) => {
+    const m = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 60000));
+    return m < 60 ? `${m} min` : m < 2880 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} days`;
+  };
+  const pctText = (n) => (n === null || n === undefined ? '–' : `${n}%`);
+  const shortDay = (iso) => new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' });
+
+  function watchCard(app) {
+    const w = app.cloud?.watch;
+    if (!w?.enabled) return null;
+    const pause = (paused) => (e) => busy(e.currentTarget, async () => {
+      await post(`/api/apps/${app.slug}/watch`, { paused });
+      toast(paused ? 'Watching paused for this app' : 'Watching again');
+      await refresh(true);
+    });
+    const checkNow = (e) => busy(e.currentTarget, async () => {
+      await post(`/api/apps/${app.slug}/watch/check`);
+      await refresh(true);
+      const now = appOf(app.slug)?.cloud?.watch;
+      toast(now?.uptime?.ok ? `${hostOf(now.target)} answered` : `${hostOf(w.target)} didn’t answer`);
+    });
+    const head = h('div', { class: 'card-head' }, icon('activity'), h('h2', {}, 'Watching'),
+      w.watching ? h('span', { class: `pill sm ${WATCH_TONE[w.status] || ''}` }, w.status === 'pending' || w.status === 'checking' ? h('span', { class: 'd' }) : null, WATCH_WORD[w.status] || w.status) : null,
+      h('span', { class: 'end sub' }, w.watching && w.uptime ? `Checked ${ago(w.uptime.at)}` : w.paused ? 'Paused' : ''));
+    const what = `Liftoff checks ${w.target ? hostOf(w.target) : 'your live site'} every ${w.everyMinutes} minutes, runs every check again once a day, and tells you when something breaks.`;
+
+    if (!w.watching) {
+      const body = [h('p', { class: 'small watch-what' }, what)];
+      if (w.why === 'no-live-url') body.push(h('p', { class: 'small watch-note' }, 'Add the live address under Deployments and watching starts on its own.'));
+      if (w.why === 'not-pro') {
+        body.push(h('p', { class: 'small watch-note' }, w.pro?.via === 'ended' ? `The 30 days of watching that came with this app’s Launch Pass ended on ${shortDay(w.pro.until)}.` : 'Part of Pro. The first 30 days come with the Launch Pass.'));
+        if (w.pro?.via === 'none') body.push(h('div', { class: 'row' }, passHint()));
+      }
+      if (w.why === 'paused') {
+        body.push(h('p', { class: 'small watch-note' }, 'Paused: Liftoff isn’t checking this app.'),
+          h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: pause(false) }, icon('play'), 'Watch again')));
+      }
+      return h('section', { class: 'card watch off' }, head, h('div', { class: 'card-body' }, body));
+    }
+
+    const u = w.uptime;
+    const d = w.daily;
+    const open = w.incidents.open;
+    const recent = w.incidents.recent;
+    const label = { up: 'Up', down: 'Down', part: 'Partly down', none: 'Not checked' };
+    const certLine = d?.cert && !d.cert.error && d.cert.days !== null ? `HTTPS certificate good for ${d.cert.days} more day${d.cert.days === 1 ? '' : 's'}` : null;
+    const domainLine = d?.domain?.days !== null && d?.domain?.days !== undefined ? `${d.domain.name} registered for ${d.domain.days} more day${d.domain.days === 1 ? '' : 's'}` : null;
+    return h('section', { class: `card watch${w.status === 'down' ? ' down' : ''}` }, head,
+      h('div', { class: 'card-body' },
+        u ? h('div', { class: 'watch-facts' },
+          h('div', {}, h('div', { class: 'k' }, 'Last 24 hours'), h('div', { class: 'v' }, pctText(u.day))),
+          h('div', {}, h('div', { class: 'k' }, 'Last 30 days'), h('div', { class: 'v' }, pctText(u.month))),
+          h('div', {}, h('div', { class: 'k' }, 'Answers in'), h('div', { class: 'v' }, u.typicalMs === null ? '–' : `${num(u.typicalMs)} ms`))) : h('p', { class: 'small watch-what' }, `${what} The first check runs within a minute.`),
+        u ? h('div', { class: 'watch-bars', role: 'img', 'aria-label': `Uptime over the last 24 hours: ${pctText(u.day)}` },
+          w.bars.map((b, i) => h('span', { key: `b${i}`, class: b, title: label[b] }))) : null,
+        u ? h('div', { class: 'watch-axis small', 'aria-hidden': 'true' }, h('span', {}, '24 hours ago'), h('span', {}, 'Now')) : null,
+        open.length ? h('ul', { class: 'watch-incidents' }, open.map((i) => h('li', { key: i.id, class: 'open' }, icon('x'),
+          h('div', { class: 'grow' }, h('div', { class: 'name' }, i.title), h('div', { class: 'small' }, `${i.detail} · since ${ago(i.openedAt)}`))))) : null,
+        h('ul', { class: 'watch-lines' },
+          d ? h('li', { key: 'daily', class: d.failed ? 'bad' : '' }, icon(d.failed ? 'x' : 'checkCircle'), h('span', {}, `Every check ran again ${ago(d.at)}: ${d.passed} passed${d.failed ? `, ${d.failed} failing` : ''}. Next run ${soon(d.next)}.`)) : h('li', { key: 'daily', class: 'wait' }, icon('clock'), h('span', {}, 'Every check runs again within a few minutes, then once a day.')),
+          certLine ? h('li', { key: 'cert', class: d.cert.days <= 14 || d.cert.trusted === false ? 'bad' : '' }, icon(d.cert.days <= 14 || d.cert.trusted === false ? 'x' : 'checkCircle'), h('span', {}, certLine)) : null,
+          domainLine ? h('li', { key: 'domain', class: d.domain.days <= 30 ? 'bad' : '' }, icon(d.domain.days <= 30 ? 'x' : 'checkCircle'), h('span', {}, domainLine)) : null),
+        recent.length ? h('details', { class: 'watch-history' },
+          h('summary', {}, `Fixed recently (${recent.length})`),
+          h('ul', {}, recent.map((i) => h('li', { key: i.id }, h('span', { class: 'grow' }, i.title), h('span', { class: 'small' }, `${shortDay(i.openedAt)}, ${span(i.openedAt, i.closedAt)}`))))) : null,
+        h('p', { class: 'small watch-alerts' }, C.me?.alerts?.channel ? `Alerts go to ${C.me.alerts.channel.label}.` : 'Get alerts in Slack or Discord: ', C.me?.alerts?.channel ? null : h('button', { class: 'link', type: 'button', onclick: () => go('settings') }, 'add a webhook in Account settings')),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn', onclick: checkNow }, icon('refresh'), 'Check now'),
+          h('button', { class: 'btn quiet', onclick: pause(true) }, 'Pause watching'),
+          w.pro?.via === 'pass' ? h('span', { class: 'small end' }, `Included with the Launch Pass until ${shortDay(w.pro.until)}`) : null)));
   }
 
   // An app that's already live: its address, so the free Verify can check
@@ -1767,7 +1895,10 @@
       C.themeSynced = true;
       if (C.me?.prefs?.theme !== pref) savePrefs({ theme: pref });
     },
+    // The overview's app cards: a watched site that's down says so instead of "Live".
+    appStatus: (a) => (a.cloud?.watch?.status === 'down' ? h('span', { class: 'pill bad' }, h('span', { class: 'd' }), 'Down') : null),
     appBadge: (a) => {
+      if (a.cloud?.watch?.status === 'down') return h('span', { class: 'pill bad sm watch-down', title: 'The live site is down' }, 'Down');
       const r = a.cloud?.run;
       if (!r) return null;
       if (r.status === 'needs-you') return h('span', { class: 'pill warn sm', title: `${ai()} needs you` }, '!');
@@ -1792,7 +1923,11 @@
       h('button', { class: 'btn', title: 'Fetch the code again and rescan it', onclick: (e) => busy(e.currentTarget, async () => { toast('Rescanning…'); await post(`/api/apps/${app.slug}/rescan`); await refresh(true); toast('Rescanned'); }) }, icon('refresh'), 'Rescan'),
       h('button', { class: 'btn primary', onclick: () => openRun(app.slug, app.cloud?.run && OPEN.has(app.cloud.run.status) ? app.cloud.run.id : null) }, icon('play'), app.cloud?.run && OPEN.has(app.cloud.run.status) ? 'Open run' : `Run with ${ai()}`),
     ],
-    afterHero: (app) => [runCard(app), passCard(app), scanCard(app), proofCard(app), reportCard(app)],
+    // A site that's down goes first; otherwise watching sits with the other proof.
+    afterHero: (app) => {
+      const down = app.cloud?.watch?.status === 'down';
+      return [runCard(app), down ? watchCard(app) : null, passCard(app), scanCard(app), proofCard(app), reportCard(app), down ? null : watchCard(app)];
+    },
     nextActionButton: (app, a) => (a.skill || a.command ? h('button', { class: 'btn', onclick: () => {
       const ids = app.steps.filter((s) => s.skill === a.skill && !['done', 'skipped'].includes(s.status)).map((s) => s.id);
       openRun(app.slug).then(() => { if (ids.length && !C.run) { C.pick = Object.fromEntries(app.steps.map((s) => [s.id, ids.includes(s.id)])); render(); } });
