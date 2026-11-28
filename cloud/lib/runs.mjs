@@ -115,7 +115,8 @@ export class RunManager {
     return this.ctx.store.allRuns((r) => r.uid === uid).some((r) => OPEN.has((this.live.get(r.id) || r).status));
   }
 
-  async start(uid, slug, { steps = [], note = '', model = null } = {}) {
+  // budgetUsd: what this run may spend (the Launch Pass can lower it).
+  async start(uid, slug, { steps = [], note = '', model = null, budgetUsd = null } = {}) {
     const ready = this.readiness();
     if (!ready.ok) throw new HttpError(503, ready.why);
     const { store, config } = this.ctx;
@@ -148,7 +149,7 @@ export class RunManager {
       note: String(note || '').trim().slice(0, 1000) || null,
       model: model || this.defaultModel(uid),
       createdAt: new Date().toISOString(),
-      budgetUsd: config.runBudgetUsd,
+      budgetUsd: Math.round((budgetUsd ?? config.runBudgetUsd) * 100) / 100,
       cost: null,
       pending: [],
       events: [],
@@ -626,11 +627,13 @@ export class RunManager {
     return run;
   }
 
-  async raiseBudget(uid, slug, id, addUsd) {
+  // limit(add): how much of `add` is allowed (the Launch Pass's Claude time).
+  async raiseBudget(uid, slug, id, addUsd, limit = (n) => n) {
     const run = this.must(uid, slug, id);
-    const add = Number(addUsd);
+    let add = Number(addUsd);
     if (!Number.isFinite(add) || add < 1 || add > 100) throw new HttpError(400, 'Add between $1 and $100.');
     if (run.status !== 'budget') throw new HttpError(409, 'This run is not paused at its budget.');
+    add = limit(add);
     this.live.set(run.id, run);
     const next = Math.round((Math.max(run.cost ?? 0, run.budgetUsd) + add) * 100) / 100;
     await this.client.beta.sessions.update(run.sessionId, { budget: { type: 'limit', max_list_cost: { amount: toCents(next), currency: 'USD' } } });

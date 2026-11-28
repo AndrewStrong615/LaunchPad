@@ -12,11 +12,13 @@ import { GitHub } from './lib/github.mjs';
 import { createSafeFetch } from './lib/safe-fetch.mjs';
 import { RunManager } from './lib/runs.mjs';
 import { ProofRunner } from './lib/proof.mjs';
+import { Billing } from './lib/billing.mjs';
 import { createApp } from './lib/app.mjs';
 import { provision } from './lib/provision.mjs';
 
 // Everything the routes need. Tests pass fakes for `anthropic`, `fetch`
-// (GitHub), `safeFetch` (the services verify reaches) and `proof` options.
+// (GitHub, and Liftoff's own Stripe account), `safeFetch` (the services
+// verify reaches) and `proof` options.
 export async function buildContext(config, { anthropic, fetch, safeFetch, proof } = {}) {
   const store = new Store(config.dataDir, makeKeys(config.secret));
   fs.rmSync(path.join(config.dataDir, 'tmp'), { recursive: true, force: true });
@@ -34,6 +36,7 @@ export async function buildContext(config, { anthropic, fetch, safeFetch, proof 
   };
   ctx.runs = new RunManager(ctx);
   ctx.proof = new ProofRunner(ctx, proof);
+  ctx.billing = new Billing(ctx, fetch || globalThis.fetch);
   return ctx;
 }
 
@@ -67,6 +70,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   console.log(`Liftoff Cloud on ${config.publicUrl} (listening on ${config.host}:${config.port})`);
   console.log(`  sign-in: ${ctx.github.oauthEnabled ? 'GitHub' : 'GitHub not set up'}${config.devLogin ? ' + local dev login' : ''}`);
   console.log(`  purchase test: ${ctx.proof.enabled ? `test browser at ${config.proof.url}` : config.proof.problem || 'off (set LIFTOFF_PROOF_URL and LIFTOFF_PROOF_SECRET)'}`);
+  const pay = config.billing;
+  console.log(`  Launch Pass: ${ctx.billing.enabled ? `$${pay.passUsd} with $${pay.claudeUsd} of Claude time (Stripe ${/^(sk|rk)_live_/.test(pay.secretKey) ? 'live' : 'test'} mode${pay.webhookSecret ? '' : ', no webhook secret'})` : 'off, everything is free (set LIFTOFF_STRIPE_SECRET_KEY)'}`);
   console.log(`  cloud runs: ${ready.ok ? `ready on ${ctx.runs.defaultModel()}${resumed ? `, following ${resumed} run(s)` : ''}` : ready.why}`);
   if (config.runModel && config.runModel !== ctx.runs.defaultModel()) console.log(`  LIFTOFF_RUN_MODEL=${config.runModel} isn't one of the models runs can use, so runs default to ${ctx.runs.defaultModel()}`);
   for (const sig of ['SIGTERM', 'SIGINT']) {

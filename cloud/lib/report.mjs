@@ -279,7 +279,7 @@ export function renderReport(report, { home = '/' } = {}) {
 <header class="top"><a class="brand" href="${esc(home)}">Liftoff</a><span>Launch report</span></header>
 <h1>${esc(r.app.name)}</h1><p class="meta">${[esc(r.app.framework), esc((r.app.platforms || []).join(', ')), live].filter(Boolean).join(' · ')}</p>
 ${verdict}
-<div class="facts"><div><div class="k">Checked</div><div class="v">${esc(longDate(r.createdAt))}</div></div><div><div class="k">Readiness score</div><div class="v">${esc(r.score)}<span>/100</span></div></div><div><div class="k">Proven by Liftoff</div><div class="v">${esc(r.counts.proven)}<span> of ${esc(r.counts.total)}</span></div></div></div>
+<div class="facts"><div><div class="k">Checked</div><div class="v">${esc(longDate(r.createdAt))}</div></div><div><div class="k">Launch score</div><div class="v">${esc(r.score)}<span>/100</span></div></div><div><div class="k">Proven by Liftoff</div><div class="v">${esc(r.counts.proven)}<span> of ${esc(r.counts.total)}</span></div></div></div>
 ${section('Proven by Liftoff', "Each of these was checked from Liftoff's own server against the live services, not ticked by hand.", proven)}
 ${purchase}
 ${section("Didn't pass", null, failed)}

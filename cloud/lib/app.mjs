@@ -86,6 +86,7 @@ export function createApp(ctx) {
         runs: all.length,
         proof: ctx.proof.view(uid, state),
         report: reportView(ctx, uid, state),
+        pass: ctx.billing.view(uid, state),
       },
     };
   }
@@ -305,6 +306,7 @@ export function createApp(ctx) {
       if (rest.length === 0 && M === 'DELETE') {
         if (runs.list(uid, slug).some((r) => LIVE.has(r.status) || r.status === 'budget')) throw new HttpError(409, 'Stop the run first.');
         if (ctx.proof.running(uid, slug)) throw new HttpError(409, 'Wait for the purchase test to finish.');
+        ctx.billing.appRemoved(uid, slug);
         store.deleteApp(uid, slug);
         return ok({ deleted: slug });
       }
@@ -324,6 +326,7 @@ export function createApp(ctx) {
       if (rest[0] === 'proof') {
         // Liftoff's own purchase test (lib/proof.mjs): start it, or fetch a screenshot.
         if (rest.length === 1 && M === 'POST') {
+          ctx.billing.require(uid, slug, 'Liftoff’s purchase test');
           limit(`proof:${uid}`, 6, 3600000);
           ctx.proof.start(uid, slug);
           return ok(view(uid, store.loadApp(uid, slug)));
@@ -334,9 +337,15 @@ export function createApp(ctx) {
           return res.end(body);
         }
       }
+      if (rest[0] === 'pass' && rest.length === 1 && M === 'POST') {
+        // Stripe Checkout for this app's Launch Pass (lib/billing.mjs).
+        limit(`pass:${uid}`, 20, 3600000);
+        return ok(await ctx.billing.checkout(uid, slug));
+      }
       if (rest[0] === 'report') {
         // A launch report (lib/report.mjs): make one after a fresh verify, or take one down.
         if (rest.length === 1 && M === 'POST') {
+          ctx.billing.require(uid, slug, 'A launch report');
           limit(`report:${uid}`, 10, 3600000);
           limit(`verify:${uid}`, 20, 60000);
           await createReport(ctx, uid, slug);
@@ -371,8 +380,9 @@ export function createApp(ctx) {
         if (rest.length === 1 && M === 'GET') return ok(runs.list(uid, slug).map((r) => ({ ...publicRun(r), events: undefined })));
         if (rest.length === 1 && M === 'POST') {
           limit(`run:${uid}`, 10, 3600000);
+          const budgetUsd = ctx.billing.runBudget(uid, slug);
           const body = await readJson(req);
-          const run = await runs.start(uid, slug, { steps: body.steps || [], note: body.note || '', model: body.model ? String(body.model) : null });
+          const run = await runs.start(uid, slug, { steps: body.steps || [], note: body.note || '', model: body.model ? String(body.model) : null, budgetUsd });
           return ok(publicRun(run));
         }
         const id = rest[1];
@@ -389,7 +399,7 @@ export function createApp(ctx) {
           if (rest[2] === 'answer') return ok(publicRun(await runs.answer(uid, slug, id, { eventId: body.eventId, text: body.text })));
           if (rest[2] === 'approve') return ok(publicRun(await runs.approve(uid, slug, id, { eventId: body.eventId, allow: body.allow === true, reason: body.reason })));
           if (rest[2] === 'stop') return ok(publicRun(await runs.stop(uid, slug, id)));
-          if (rest[2] === 'budget') return ok(publicRun(await runs.raiseBudget(uid, slug, id, body.addUsd)));
+          if (rest[2] === 'budget') return ok(publicRun(await runs.raiseBudget(uid, slug, id, body.addUsd, (n) => ctx.billing.raiseLimit(uid, slug, n))));
         }
         if (M === 'GET' && rest[2] === 'outputs' && rest[3]) {
           const { file, body } = await runs.download(uid, slug, id, rest[3]);
@@ -450,6 +460,12 @@ export function createApp(ctx) {
     const origin = originOf();
     const url = new URL(req.url, origin);
     try {
+      // Stripe's webhook for the Launch Pass: signed by Stripe, not sent from our pages.
+      if (url.pathname === '/billing/stripe-webhook' && req.method === 'POST') {
+        limit('stripe-webhook', 600, 60000);
+        const raw = await readRaw(req, 512 * 1024);
+        return send(res, 200, ctx.billing.webhook(raw.toString('utf8'), req.headers['stripe-signature']));
+      }
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         // Writes only from this site's own pages.
         if (req.headers.origin !== origin) throw new HttpError(403, 'Bad origin');
@@ -471,6 +487,19 @@ export function createApp(ctx) {
           return page(res, 'login.html');
         }
         if (url.pathname === '/login/options') return send(res, 200, { github: github.oauthEnabled, dev: config.devLogin });
+        if (url.pathname === '/billing/done') {
+          // Back from Stripe Checkout: the pass is granted from Stripe's own record of it.
+          const me = signedIn(req);
+          if (!me) return redirect(res, '/login');
+          try {
+            limit(`pass:${me.user.id}`, 20, 3600000);
+            const { slug, paid } = await ctx.billing.confirm(me.user.id, url.searchParams.get('session_id'));
+            return redirect(res, `/?pass=${paid ? 'ok' : 'pending'}#${encodeURIComponent(slug)}`);
+          } catch (e) {
+            if (!(e instanceof HttpError)) console.error('[liftoff-cloud] /billing/done:', e?.stack || e);
+            return redirect(res, '/?pass=error');
+          }
+        }
         if (url.pathname.startsWith('/r/') || url.pathname.startsWith('/b/')) {
           if (shared(req, res, url) !== null) return;
         }
