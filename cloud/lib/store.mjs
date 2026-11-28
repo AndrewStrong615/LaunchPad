@@ -6,6 +6,7 @@
 //   users/<uid>/apps/<slug>/source/    the imported code, scanned by verify and the pre-scan
 //   users/<uid>/apps/<slug>/runs/<id>.json  cloud runs with Claude
 //   users/<uid>/apps/<slug>/reports/<id>/   launch reports and their evidence
+//   users/<uid>/apps/<slug>/watch.json  uptime samples, daily checks, incidents (lib/watch.mjs)
 //   sessions/<sid>.json                sign-in sessions (each names its user)
 //   github/<id>.json                   GitHub user id -> uid
 //   public/<id>.json                   a shared report or badge link -> { uid, slug }
@@ -76,6 +77,15 @@ export class Store {
     writeJson(path.join(this.userDir(user.id), 'user.json'), user);
     if (user.githubId) writeJson(path.join(this.dir, 'github', `${Number(user.githubId)}.json`), { uid: user.id });
     return user;
+  }
+
+  // Every user id on the server (the watcher walks them for apps to check).
+  listUsers() {
+    try {
+      return fs.readdirSync(path.join(this.dir, 'users')).filter((u) => UID.test(u));
+    } catch {
+      return [];
+    }
   }
 
   findUserByGithubId(githubId) {

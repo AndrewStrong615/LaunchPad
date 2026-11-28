@@ -14,6 +14,7 @@ import { RunManager } from './lib/runs.mjs';
 import { ProofRunner } from './lib/proof.mjs';
 import { Billing } from './lib/billing.mjs';
 import { Records } from './lib/records.mjs';
+import { Watcher } from './lib/watch.mjs';
 import { createApp } from './lib/app.mjs';
 import { provision } from './lib/provision.mjs';
 import { modelFor } from './lib/agent.mjs';
@@ -21,8 +22,8 @@ import { toTokens, tokenWord } from './lib/brand.mjs';
 
 // Everything the routes need. Tests pass fakes for `anthropic`, `fetch`
 // (GitHub, and Liftoff's own Stripe account), `safeFetch` (the services
-// verify reaches) and `proof` options.
-export async function buildContext(config, { anthropic, fetch, safeFetch, proof } = {}) {
+// verify reaches), `proof` options and `watch` options (lib/watch.mjs).
+export async function buildContext(config, { anthropic, fetch, safeFetch, proof, watch } = {}) {
   const store = new Store(config.dataDir, makeKeys(config.secret));
   fs.rmSync(path.join(config.dataDir, 'tmp'), { recursive: true, force: true });
   let client = anthropic;
@@ -41,6 +42,7 @@ export async function buildContext(config, { anthropic, fetch, safeFetch, proof 
   ctx.runs = new RunManager(ctx);
   ctx.proof = new ProofRunner(ctx, proof);
   ctx.billing = new Billing(ctx, fetch || globalThis.fetch);
+  ctx.watch = new Watcher(ctx, watch);
   return ctx;
 }
 
@@ -60,8 +62,10 @@ export async function startCloud(config = loadConfig(), deps = {}) {
     server.listen(config.port, config.host, resolve);
   });
   const resumed = ctx.runs.resumeAll();
+  if (deps.watch?.autostart !== false) ctx.watch.start();
   const stop = async () => {
     server.close();
+    await ctx.watch.stop();
     await ctx.runs.close();
   };
   return { server, ctx, stop, resumed, url: `http://localhost:${server.address().port}` };
@@ -76,6 +80,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   console.log(`  purchase test: ${ctx.proof.enabled ? `test browser at ${config.proof.url}` : config.proof.problem || 'off (set LIFTOFF_PROOF_URL and LIFTOFF_PROOF_SECRET)'}`);
   const pay = config.billing;
   console.log(`  Launch Pass: ${ctx.billing.enabled ? `$${pay.passUsd} with $${pay.claudeUsd} of Claude time, shown as ${tokenWord(toTokens(pay.claudeUsd, config.tokensPerUsd))} (Stripe ${/^(sk|rk)_live_/.test(pay.secretKey) ? 'live' : 'test'} mode${pay.webhookSecret ? '' : ', no webhook secret'})` : 'off, everything is free (set LIFTOFF_STRIPE_SECRET_KEY)'}`);
+  console.log(`  watching: ${config.watch.on ? `live sites every ${config.watch.uptimeMinutes} min, every check again every ${config.watch.dailyHours} h` : 'off (LIFTOFF_WATCH=0)'}`);
   console.log(`  assistant: ${config.assistant}, ${config.tokensPerUsd} tokens to the dollar of Claude time`);
   console.log(`  cloud runs: ${ready.ok ? `ready on ${ctx.runs.defaultModel()}${resumed ? `, following ${resumed} run(s)` : ''}` : ready.why}`);
   if (config.runModel && !modelFor(config.runModel)) console.log(`  LIFTOFF_RUN_MODEL=${config.runModel} isn't one of the modes or models runs can use, so runs default to ${ctx.runs.defaultModel()}`);

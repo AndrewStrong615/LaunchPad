@@ -26,6 +26,10 @@ const SESSION = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const KIND = 'launch_pass';
 const OPEN_RUN = new Set(['starting', 'running', 'needs-you', 'budget']);
 const MAX_SKEW_S = 300;
+// Watching (lib/watch.mjs) is what Pro pays for. Every Launch Pass comes
+// with this many days of it, so people see it work before they're asked to pay.
+export const PRO_DAYS_WITH_PASS = 30;
+const DAY = 86_400_000;
 
 // What the pass adds for one app. The purchase test runs on web apps that
 // take payments through Stripe, and only web apps can be certified so far,
@@ -120,6 +124,19 @@ export class Billing {
   // Whether the paid parts are open for this app.
   unlocked(uid, slug) {
     return !this.enabled || this.free(uid) || !!this.pass(uid, slug);
+  }
+
+  // Whether Liftoff watches this app: { active, via, until }. via is 'open'
+  // (payments off, so everything is free), 'free' (a LIFTOFF_FREE_LOGINS
+  // login), 'pass' (the days that come with the Launch Pass), 'ended' (those
+  // days are over) or 'none' (no pass yet).
+  pro(uid, slug, now = Date.now()) {
+    if (!this.enabled) return { active: true, via: 'open', until: null };
+    if (this.free(uid)) return { active: true, via: 'free', until: null };
+    const p = this.pass(uid, slug);
+    if (!p) return { active: false, via: 'none', until: null };
+    const until = Date.parse(p.at) + PRO_DAYS_WITH_PASS * DAY;
+    return { active: now < until, via: now < until ? 'pass' : 'ended', until: new Date(until).toISOString() };
   }
 
   // Claude time on the pass, in dollars: what's included, what finished runs

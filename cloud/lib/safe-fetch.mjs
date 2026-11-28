@@ -34,7 +34,9 @@ export function isBlockedAddress(ip) {
   return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80 || (first & 0xff00) === 0xff00;
 }
 
-function guardedLookup(hostname, options, callback) {
+// A dns lookup that refuses private addresses; also used for raw TLS
+// connections (lib/watch.mjs reads certificates with it).
+export function guardedLookup(hostname, options, callback) {
   dns.lookup(hostname, { ...options, all: true }, (err, addresses) => {
     if (err) return callback(err);
     const bad = addresses.find((a) => isBlockedAddress(a.address));

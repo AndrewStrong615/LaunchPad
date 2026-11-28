@@ -95,6 +95,7 @@ export function createApp(ctx) {
         proof: ctx.proof.view(uid, state),
         report: reportView(ctx, uid, state),
         pass: ctx.billing.view(uid, state),
+        watch: ctx.watch.view(uid, state),
       },
     };
   }
@@ -406,6 +407,20 @@ export function createApp(ctx) {
         const body = await readJson(req);
         const value = validateSetting(String(body.key || ''), body.value);
         return save((s) => setConfig(s, String(body.key), value || null));
+      }
+      if (rest[0] === 'watch' && M === 'POST') {
+        // Watching (lib/watch.mjs): pause or resume it, or check the site now.
+        if (rest.length === 1) {
+          const body = await readJson(req);
+          if (typeof body.paused !== 'boolean') throw new HttpError(400, 'paused is true or false.');
+          ctx.watch.setPaused(uid, slug, body.paused);
+          return ok(view(uid, store.loadApp(uid, slug)));
+        }
+        if (rest[1] === 'check' && rest.length === 2) {
+          limit(`watch:${uid}`, 10, 60000);
+          await ctx.watch.checkNow(uid, slug);
+          return ok(view(uid, store.loadApp(uid, slug)));
+        }
       }
       if (rest[0] === 'live' && rest.length === 1 && M === 'POST') {
         // Where an app that's already live runs, so the free Verify can check it.
