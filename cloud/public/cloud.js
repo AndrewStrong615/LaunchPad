@@ -266,11 +266,19 @@
   const obSave = () => {
     try { sessionStorage.setItem('lc-welcome', JSON.stringify({ step: C.ob.step, slug: C.ob.slug })); } catch {}
   };
+  // Each step is its own history entry, so the browser's Back goes to the
+  // step before (popstate below), not out of the tour.
   function obGo(step) {
+    if (step !== C.ob.step) history.pushState({ ob: step }, '', '#!welcome');
     C.ob.step = step;
     obSave();
     render();
     window.scrollTo(0, 0);
+  }
+  function obPopped(saved) {
+    if (state.view !== 'welcome') return;
+    C.ob.step = Math.min(Math.max(saved?.ob | 0, 0), OB_STEPS.length - 1);
+    obSave();
   }
   function obStart() {
     C.ob = obFresh();
@@ -495,13 +503,15 @@
   // 4. Free versus the Launch Pass.
   function obPlans(app) {
     const p = app.cloud?.pass;
+    // The price shows wherever someone would pay it: not on a free account or an app that has its pass.
+    const priced = !!p?.enabled && !p.free && !p.pass && !!p.price?.usd;
     const list = (items) => h('ul', { class: 'pass-list' }, items.map((x) => h('li', { key: x }, icon('check'), h('span', {}, x))));
     const status = !p || !p.enabled ? h('span', { class: 'pill good' }, icon('check'), 'Included on this server')
       : p.free ? h('span', { class: 'pill good' }, icon('check'), 'Included with your account')
         : p.pass ? h('span', { class: 'pill good' }, icon('check'), `Active for ${app.name}`)
           : h('span', { class: 'small' }, `Get it on ${app.name}’s page when you’re ready to launch.`);
     return [
-      obHead('What’s free, and what the Launch Pass adds', 'Everything that shows where your app stands is free, for every app. The Launch Pass is for getting it done: one payment per app, no subscription.'),
+      obHead('What’s free, and what the Launch Pass adds', `Everything that shows where your app stands is free, for every app. The Launch Pass is for getting it done: ${priced ? `${usd0(p.price.usd)}, paid once per app` : 'one payment per app'}, no subscription.`),
       h('div', { class: 'ob-plans' },
         h('section', { class: 'card ob-plan' },
           h('div', { class: 'plan-top' }, h('h2', {}, 'Free'), h('span', { class: 'pill sm' }, 'Every app')),
@@ -509,9 +519,12 @@
           list(['The scan: stack, platforms, store rules and leaked keys', 'A launch score and the list of what’s left', 'Verify: real checks against your live services', 'Pulse: sign-ups, revenue and crashes in one place']),
           h('div', { class: 'plan-foot' }, h('span', { class: 'pill good' }, icon('check'), 'On now'))),
         h('section', { class: 'card ob-plan pass' },
-          h('div', { class: 'plan-top' }, h('h2', {}, 'Launch Pass'), h('span', { class: 'pill sm' }, 'Per app')),
+          h('div', { class: 'plan-top' }, h('h2', {}, 'Launch Pass'), priced ? h('span', { class: 'plan-price' }, h('b', {}, usd0(p.price.usd)), h('span', {}, ' once, for this app')) : h('span', { class: 'pill sm' }, 'Per app')),
           h('p', { class: 'small' }, `${ai()} does the launch with you, then Liftoff proves it works.`),
-          list([`${ai()} does the launch steps in a private cloud sandbox`, 'Changes come back as a pull request, or a patch for zips', 'A real test purchase in Liftoff’s own browser, with screenshots', 'A launch report and the “Launch certified” badge', p?.enabled && p.price?.tokens ? `${tok(p.price.tokens)} for runs included` : null].filter(Boolean)),
+          list([`${ai()} does the launch steps in a private cloud sandbox`, 'Changes come back as a pull request, or a patch for zips',
+            ...(p?.includes ? p.includes.slice(1) : ['A real test purchase in Liftoff’s own browser, with screenshots', 'A launch report and the “Launch certified” badge']),
+            p?.enabled && p.price?.tokens ? passTokens(p.price) : null].filter(Boolean)),
+          p?.later ? h('p', { class: 'small pass-later' }, p.later) : null,
           h('div', { class: 'plan-foot' }, status))),
       obActs(obNext(`Open ${app.name}`, () => obDone(app.slug)), obBack(2)),
     ];
@@ -547,11 +560,20 @@
   function keyDialog(a) {
     const big = (f) => f === 'APP_STORE_CONNECT_KEY' || f.endsWith('_JSON');
     const dlg = h('dialog', { class: 'modal', 'aria-label': `Connect ${a.label}` });
+    // A key that can't be right is said here: a toast would sit behind the dialog.
+    const err = h('div', { class: 'note-box bad', role: 'alert', hidden: true });
     const form = h('form', { onsubmit: (e) => {
       e.preventDefault();
       const values = Object.fromEntries(a.fields.map((f) => [f, String(new FormData(e.currentTarget).get(f) || '')]));
+      err.hidden = true;
       busy(e.submitter, async () => {
-        state.accounts = await post(`/api/accounts/${a.id}`, { values });
+        try {
+          state.accounts = await post(`/api/accounts/${a.id}`, { values });
+        } catch (x) {
+          err.textContent = x.message;
+          err.hidden = false;
+          return;
+        }
         dlg.close();
         toast(`${a.label} connected`);
         await refresh(true);
@@ -560,8 +582,9 @@
     h('div', { class: 'modal-head' }, h('span', { class: 'head-tile' }, icon('key')), h('div', {}, h('h2', {}, `Connect ${a.label}`),
       h('p', { class: 'small' }, `Stored encrypted on the server. ${ai()} never sees the real value: its sandbox gets a placeholder that becomes the key only on the way to `, a.label, '.'))),
     a.fields.map((f) => h('label', { class: 'field' }, h('span', {}, f),
-      big(f) ? h('textarea', { name: f, class: 'in', required: true, spellcheck: 'false' })
-        : h('input', { name: f, type: /ACCOUNT_ID|KEY_ID|ISSUER_ID/.test(f) ? 'text' : 'password', autocomplete: 'off', spellcheck: 'false', required: true }))),
+      big(f) ? h('textarea', { name: f, class: 'in', required: true, spellcheck: 'false', placeholder: a.hints?.[f] || '' })
+        : h('input', { name: f, type: /ACCOUNT_ID|KEY_ID|ISSUER_ID/.test(f) ? 'text' : 'password', autocomplete: 'off', spellcheck: 'false', required: true, placeholder: a.hints?.[f] || '' }))),
+    err,
     a.url ? h('p', { class: 'small' }, h('a', { href: a.url, target: '_blank', rel: 'noopener' }, `Get a key from ${a.label}`, ' ', icon('external'))) : null,
     h('div', { class: 'acts' }, h('button', { class: 'btn quiet', type: 'button', onclick: () => dlg.close() }, 'Cancel'), h('button', { class: 'btn primary', type: 'submit' }, 'Save')));
     dlg.append(form);
@@ -906,6 +929,12 @@
   // the purchase test and launch reports. The scan, verify and the readiness
   // score stay free, and this card shows them as the reason to buy.
   const usd0 = (n) => `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  // How far the pass's tokens go: a run checks with you before it passes
+  // its own budget, so the pass covers at least this many runs.
+  const passTokens = (price) => {
+    const runs = price.runTokens ? Math.floor(price.tokens / price.runTokens) : 0;
+    return runs >= 2 ? `${tok(price.tokens)} for runs included, at least ${runs} runs (each one asks before going past ${num(price.runTokens)})` : `${tok(price.tokens)} for runs included`;
+  };
   const locked = (app) => !!app.cloud?.pass && !app.cloud.pass.unlocked;
   // Tokens left on the app's pass (Infinity when payments are off or free).
   const tokensLeft = (app) => app.cloud?.pass?.pass?.tokens?.left ?? Infinity;
@@ -949,7 +978,8 @@
           h('div', { class: 'k' }, 'The pass adds'),
           h('ul', { class: 'pass-list' },
             p.includes.map((x) => h('li', { key: x }, icon('check'), h('span', {}, x))),
-            h('li', { key: 'tokens' }, icon('check'), h('span', {}, `${tok(p.price.tokens)} for runs included`))),
+            h('li', { key: 'tokens' }, icon('check'), h('span', {}, passTokens(p.price)))),
+          p.later ? h('p', { class: 'small pass-later' }, p.later) : null,
           h('div', { class: 'row' },
             h('button', { class: 'btn primary', onclick: buyPass(app.slug) }, icon('rocket'), `Get the Launch Pass · ${usd0(p.price.usd)}`)),
           p.testMode ? h('p', { class: 'small pass-test' }, 'Stripe test mode: pay with 4242 4242 4242 4242, any future date and any CVC.') : null)));
@@ -1036,6 +1066,7 @@
         !now.certified && missing.length ? h('ul', { class: 'report-missing' },
           missing.map((m) => h('li', { key: m }, icon('circle'), h('span', {}, m))),
           now.missing.length > missing.length ? h('li', { key: 'more', class: 'more' }, h('span', {}, `and ${now.missing.length - missing.length} more`)) : null) : null,
+        now.unnamed ? h('p', { class: 'small report-what' }, `The public page counts ${now.unnamed === 1 ? 'the security check' : `the ${now.unnamed} security checks`} that haven’t passed without naming ${now.unnamed === 1 ? 'it' : 'them'}, so it doesn’t point anyone at a weakness.`) : null,
         h('div', { class: 'row' },
           h('button', { class: `btn${now.certified || !latest ? ' primary' : ''}`, disabled: locked(app), onclick: create }, icon('flag'), latest ? 'Make a new report' : 'Make the report'),
           locked(app) ? passHint() : null,
@@ -1056,6 +1087,28 @@
             h('a', { class: 'grow', href: x.url, target: '_blank', rel: 'noopener' }, `${longDay(x.at)} · score ${x.score}`),
             h('button', { class: 'btn sm ghost', title: 'Take this report down', 'aria-label': 'Take this report down', onclick: takeDown(x.id) }, icon('trash')))))) : null,
         latest ? h('p', { class: 'small report-down' }, h('button', { class: 'link', onclick: takeDown(latest.id) }, 'Take the newest report down')) : null));
+  }
+
+  // An app that's already live: its address, so the free Verify can check
+  // hosting, HTTPS and the legal pages without a run. Saving it empty removes it.
+  function liveForm(app) {
+    const id = `live-${app.slug}`;
+    const save = (e) => {
+      e.preventDefault();
+      const url = e.currentTarget.elements.url.value.trim();
+      if (url === (app.liveUrl || '')) return;
+      busy(e.submitter, async () => {
+        await post(`/api/apps/${app.slug}/live`, { url });
+        toast(url ? 'Saved. Press Verify to check the live site.' : 'Live address removed');
+        await refresh(true);
+      });
+    };
+    return h('form', { class: 'live-form', onsubmit: save },
+      h('label', { class: 'k', for: id }, app.liveUrl ? 'Live address' : 'Already live?'),
+      app.liveUrl ? null : h('div', { class: 'small' }, 'Add its address so Verify can check hosting, HTTPS and the privacy and terms pages.'),
+      h('div', { class: 'row' },
+        h('input', { id, name: 'url', class: 'in grow', type: 'text', inputmode: 'url', autocomplete: 'off', spellcheck: 'false', placeholder: 'https://myapp.com', value: app.liveUrl || '' }),
+        h('button', { class: 'btn', type: 'submit', 'aria-label': 'Save the live address' }, 'Save')));
   }
 
   function settingsCard(app) {
@@ -1639,6 +1692,8 @@
     } }, icon('play'), `Do it with ${ai()}`) : null),
     stepsHeadEnd: (app) => h('button', { class: 'btn', onclick: () => openRun(app.slug) }, icon('play'), `Run with ${ai()}`),
     mainBottom: settingsCard,
+    deploysFoot: liveForm,
+    popstate: obPopped,
     afterRender: () => {
       document.body.classList.toggle('ob-on', state.view === 'welcome');
       // A new account with no apps starts on the welcome tour, once.

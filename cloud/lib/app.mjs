@@ -13,7 +13,7 @@ import { HttpError, cookie, parseCookies, readJson, readRaw, redirect, send } fr
 import { sign, unsign } from './crypto.mjs';
 import { connectUserAccount, disconnectUserAccount, listUserAccounts } from './accounts.mjs';
 import { githubToken, importFromGitHub, importFromZip, rescan } from './importer.mjs';
-import { pulseApp, validateSetting, verifyApp } from './tools.mjs';
+import { pulseApp, setLiveUrl, validateLiveUrl, validateSetting, verifyApp } from './tools.mjs';
 import { LIVE, publicRun } from './runs.mjs';
 import { MODELS, STRONGEST_TIER, TIERS, modelFor, tierOf } from './agent.mjs';
 import { toTokens } from './brand.mjs';
@@ -406,6 +406,12 @@ export function createApp(ctx) {
         const body = await readJson(req);
         const value = validateSetting(String(body.key || ''), body.value);
         return save((s) => setConfig(s, String(body.key), value || null));
+      }
+      if (rest[0] === 'live' && rest.length === 1 && M === 'POST') {
+        // Where an app that's already live runs, so the free Verify can check it.
+        const body = await readJson(req);
+        const url = validateLiveUrl(body.url);
+        return save((s) => setLiveUrl(s, url));
       }
 
       if (rest[0] === 'runs') {

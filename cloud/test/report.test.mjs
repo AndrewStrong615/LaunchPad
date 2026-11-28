@@ -97,6 +97,7 @@ test('the public page escapes everything and leaves out why checks failed', () =
   const checklist = {
     ...allProven(),
     'sec-rls': { done: false, by: null, at: null, verify: { ok: false, detail: 'RLS off on: secret_admin_notes', at: daysAgo(0) } },
+    'pay-live': { done: false, by: null, at: null, verify: { ok: false, detail: 'Stripe key sk_test_123 is a test key', at: daysAgo(0) } },
     'crash-sdk': { done: false, by: null, at: null, verify: { ok: null, detail: 'set sentry.org and sentry.project to check events arrive', at: daysAgo(0) } },
   };
   checklist['land-legal'] = proven(1, '/privacy and /terms load');
@@ -111,7 +112,30 @@ test('the public page escapes everything and leaves out why checks failed', () =
   assert.match(html, /\/privacy and \/terms load/, 'what passed is the evidence');
   assert.match(html, /Not certified yet/);
   assert.match(html, /Didn&#39;t pass/);
+  assert.match(html, /Live keys swapped in for production/, 'a check that points at no weakness is named');
+  assert.doesNotMatch(html, /sk_test_123/);
   assert.doesNotMatch(html, /<script|style=/, 'no scripts or inline styles (CSP)');
+});
+
+test("the public page counts security checks that haven't passed without naming them", () => {
+  const checklist = {
+    ...allProven(),
+    'sec-keys': { done: false, by: null, at: null, verify: { ok: false, detail: 'Stripe secret key in src/pay.js', at: daysAgo(0) } },
+    'pay-webhook': { done: false, by: null, at: null, verify: { ok: false, detail: 'no signature check', at: daysAgo(0) } },
+    'sec-rate': { done: true, by: 'you', at: daysAgo(1) },
+  };
+  const state = app({ checklist, payments: ['stripe'] });
+  const a = assess(state, { now: NOW });
+  assert.equal(a.certified, false);
+  const html = renderReport({ id: 'rp_AAAAAAAAAAAAAAAAAAAA', createdAt: new Date(NOW).toISOString(), app: { name: 'Invoicely', framework: 'nextjs', platforms: ['web'], liveUrl: null }, ...a, purchase: null });
+  assert.doesNotMatch(html, /No secret keys in the client bundle/);
+  assert.doesNotMatch(html, /Webhook endpoint verifies signatures/);
+  assert.doesNotMatch(html, /Spend caps|Database backups/, 'open security checks are counted too');
+  assert.match(html, /\d+ security checks<\/div><div class="d">Not named on this page until Liftoff proves them/);
+  assert.match(html, /Rate limits on auth and paid endpoints/, 'what the team says is done is still listed, as reported');
+  assert.doesNotMatch(html, /Didn&#39;t pass/, 'no other check failed');
+  const n = a.checks.filter((c) => ['sec-keys', 'pay-webhook', 'sec-rls', 'sec-spend', 'sec-backup', 'pay-entitlement', 'ci-secrets'].includes(c.id) && c.status !== 'proven' && c.status !== 'reported').length;
+  assert.match(html, new RegExp(`${n} security checks`));
 });
 
 test('the badge claims only what the newest report says', () => {

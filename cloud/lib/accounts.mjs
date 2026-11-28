@@ -30,6 +30,78 @@ export const SIGNING_ENV = new Set(['APP_STORE_CONNECT_KEY', 'GOOGLE_PLAY_SERVIC
 
 const MAX_VALUE = 20000;
 
+// What a key looks like, so a typo or the wrong key is caught when it's
+// typed, not later in Verify. Only formats the services have kept for years
+// are checked; any other key just has to be one line with no spaces.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const KEY_FORMATS = {
+  STRIPE_SECRET_KEY: {
+    hint: 'sk_test_… or sk_live_…',
+    check: (v) => (/^(sk|rk)_(test|live)_[A-Za-z0-9_]+$/.test(v) ? null
+      : /^pk_/.test(v) ? 'That’s the publishable key (pk_…). Paste the secret key (sk_…) or a restricted key (rk_…) from the same page.'
+        : 'That isn’t a Stripe secret key. Those start with sk_test_ or sk_live_ (rk_ for a restricted key).'),
+  },
+  REVENUECAT_API_KEY: {
+    hint: 'sk_…',
+    check: (v) => (/^(appl|goog|amzn|strp|rcb)_/.test(v) ? 'That’s a public app key. Paste a secret API key (sk_…) from your RevenueCat project’s API keys.' : null),
+  },
+  GITHUB_TOKEN: {
+    hint: 'github_pat_… or ghp_…',
+    check: (v) => (/^(gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|[0-9a-f]{40})$/.test(v) ? null : 'That isn’t a GitHub token. Those start with github_pat_ or ghp_.'),
+  },
+  SUPABASE_ACCESS_TOKEN: {
+    hint: 'sbp_…',
+    check: (v) => (/^sbp_[A-Za-z0-9_]+$/.test(v) ? null : 'That isn’t a Supabase access token. Those start with sbp_ (a project’s anon or service_role key won’t work here).'),
+  },
+  POSTHOG_PERSONAL_API_KEY: {
+    hint: 'phx_…',
+    check: (v) => (/^phx_[A-Za-z0-9_]+$/.test(v) ? null
+      : /^phc_/.test(v) ? 'That’s the project key (phc_…), which can’t read data. Paste a personal API key (phx_…).'
+        : 'That isn’t a PostHog personal API key. Those start with phx_.'),
+  },
+  SENTRY_AUTH_TOKEN: {
+    hint: 'sntryu_… or sntrys_…',
+    check: (v) => (/^(sntry[su]_[A-Za-z0-9_=+/.-]+|[0-9a-f]{64})$/.test(v) ? null : 'That isn’t a Sentry auth token. Those start with sntryu_ or sntrys_.'),
+  },
+  RESEND_API_KEY: {
+    hint: 're_…',
+    check: (v) => (/^re_[A-Za-z0-9_]+$/.test(v) ? null : 'That isn’t a Resend API key. Those start with re_.'),
+  },
+  APP_STORE_CONNECT_KEY_ID: {
+    hint: '10 letters and numbers',
+    check: (v) => (/^[A-Z0-9]{10}$/.test(v) ? null : 'The key ID is the 10 letters and numbers next to the key in App Store Connect.'),
+  },
+  APP_STORE_CONNECT_ISSUER_ID: {
+    hint: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+    check: (v) => (UUID.test(v) ? null : 'The issuer ID is the long ID with dashes at the top of App Store Connect’s API keys page.'),
+  },
+  APP_STORE_CONNECT_KEY: {
+    hint: 'The whole .p8 file',
+    check: (v) => (/^-----BEGIN PRIVATE KEY-----[\s\S]+-----END PRIVATE KEY-----$/.test(v) ? null : 'Paste the whole .p8 file, from -----BEGIN PRIVATE KEY----- to -----END PRIVATE KEY-----.'),
+  },
+  GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: {
+    hint: 'The whole JSON key file',
+    check: (v) => {
+      let j;
+      try {
+        j = JSON.parse(v);
+      } catch {
+        return 'Paste the whole JSON key file you downloaded for the service account.';
+      }
+      return j?.type === 'service_account' && j.client_email && j.private_key ? null : 'That JSON isn’t a service account key. Download a JSON key for the service account in Google Cloud.';
+    },
+  },
+};
+const MULTILINE = new Set(['APP_STORE_CONNECT_KEY', 'GOOGLE_PLAY_SERVICE_ACCOUNT_JSON']);
+
+// Why a value can't be this key, or null when it looks right.
+export function keyProblem(name, value) {
+  const f = KEY_FORMATS[name];
+  if (f) return f.check(value);
+  if (!MULTILINE.has(name) && /\s/.test(value)) return `${name} is one line with no spaces. Copy it again from the service.`;
+  return null;
+}
+
 export function listUserAccounts(store, uid) {
   const secrets = store.getSecrets(uid);
   return Object.entries(ACCOUNTS).map(([id, def]) => {
@@ -40,7 +112,8 @@ export function listUserAccounts(store, uid) {
       note: def.note,
       url: def.url,
       fields: def.env,
-      connected: !!rec && def.env.every((k) => rec.values?.[k]),
+      hints: Object.fromEntries(def.env.filter((k) => KEY_FORMATS[k]).map((k) => [k, KEY_FORMATS[k].hint])),
+      connected:!!rec && def.env.every((k) => rec.values?.[k]),
       connectedAt: rec?.connectedAt || null,
       source: rec?.source || null,
       store: rec ? 'cloud' : null,
@@ -58,6 +131,8 @@ export function connectUserAccount(store, uid, id, values, source = 'you') {
     const v = typeof values?.[k] === 'string' ? values[k].trim() : '';
     if (!v) throw Object.assign(new Error(`Enter ${k} for ${def.label}.`), { status: 400 });
     if (v.length > MAX_VALUE) throw Object.assign(new Error(`${k} is too long.`), { status: 400 });
+    const problem = keyProblem(k, v);
+    if (problem) throw Object.assign(new Error(problem), { status: 400 });
     clean[k] = store.encrypt(v);
   }
   const secrets = store.getSecrets(uid);

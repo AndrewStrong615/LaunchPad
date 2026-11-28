@@ -74,7 +74,7 @@ export class ProofRunner {
     const key = userEnv(this.ctx.store, uid, ['stripe']).STRIPE_SECRET_KEY;
     if (!key) return 'Connect Stripe with a test-mode key on the Accounts page.';
     if (!isTestKey(key)) return 'The connected Stripe key is a live key. Connect a test-mode key (sk_test_…) so the test never charges a real card.';
-    if (!this.target(state)) return 'Set preview.url to a deploy that uses Stripe test keys (or record the live deploy first).';
+    if (!this.target(state)) return 'Set preview.url to a deploy that uses Stripe test keys (or add the live address under Deployments).';
     return null;
   }
 

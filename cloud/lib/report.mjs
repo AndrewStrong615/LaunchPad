@@ -35,6 +35,13 @@ export function requiredChecks(state, { stripeConnected = false } = {}) {
   return ids;
 }
 
+// Checks whose title alone points at a weakness when they haven't passed
+// ("No secret keys in the client bundle" with a cross tells anyone where to
+// look). The public page counts these without naming them until Liftoff
+// proves them, or the team says they're done.
+const SENSITIVE = new Set(['sec-keys', 'sec-rls', 'sec-rate', 'sec-spend', 'sec-backup', 'pay-webhook', 'pay-entitlement', 'ci-secrets']);
+export const unnamedInPublic = (c) => SENSITIVE.has(c.id) && c.status !== 'proven' && c.status !== 'reported';
+
 const day = (iso) => (iso ? new Date(iso).toISOString().slice(0, 10) : null);
 
 function statusOf(item, now) {
@@ -214,7 +221,7 @@ export function reportView(ctx, uid, state) {
   const badgeId = state.report?.badgeId || null;
   const history = (state.report?.history || []).map((r) => ({ ...r, url: `${base}/r/${r.id}` }));
   return {
-    now: { certified: a.certified, missing: a.missing, score: a.score, counts: a.counts },
+    now: { certified: a.certified, missing: a.missing, score: a.score, counts: a.counts, unnamed: a.checks.filter(unnamedInPublic).length },
     latest: history[0] || null,
     history,
     badge: badgeId ? { url: `${base}/b/${badgeId}`, image: `${base}/b/${badgeId}.svg`, clicks: badgeClicks(ctx, uid, state.slug) } : null,
@@ -250,22 +257,26 @@ const TICK = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M19
 const CROSS = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
 const DOT = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/></svg>';
 
-function section(title, intro, rows, { folded = false } = {}) {
+function section(title, intro, rows, { folded = false, count = rows.length } = {}) {
   if (!rows.length) return '';
-  const head = `${esc(title)} <span class="n">${rows.length}</span>`;
+  const head = `${esc(title)} <span class="n">${count}</span>`;
   const list = `${intro ? `<p class="intro">${esc(intro)}</p>` : ''}<ul class="checks">${rows.join('')}</ul>`;
   return folded ? `<section><details><summary><h2>${head}</h2></summary>${list}</details></section>` : `<section><h2>${head}</h2>${list}</section>`;
 }
 
-// Failed checks show no details: a public page shouldn't point at a weakness.
+// A public page shouldn't point at a weakness: failed checks show no details,
+// and security checks that haven't passed are counted, not named. Reports
+// made before this rule follow it too, since it applies as the page is drawn.
 export function renderReport(report, { home = '/', assistant = DEFAULT_ASSISTANT } = {}) {
   const r = report;
   const by = (who) => (who === 'claude' ? assistant : BY[who]);
-  const { checks } = r;
+  const unnamed = r.checks.filter(unnamedInPublic).length;
+  const checks = r.checks.filter((c) => !unnamedInPublic(c));
   const row = (c, icon, cls, note) => `<li class="${cls}">${icon}<div><div class="t">${esc(c.title)}${c.required ? ' <span class="req">Required</span>' : ''}</div>${note ? `<div class="d">${esc(note)}</div>` : ''}</div></li>`;
   const proven = checks.filter((c) => c.status === 'proven').sort((a, b) => b.required - a.required).map((c) => row(c, TICK, 'ok', [c.detail, c.at && `checked ${day(c.at)}`].filter(Boolean).join(' · ')));
   const failed = checks.filter((c) => c.status === 'failed').map((c) => row(c, CROSS, 'bad', `didn't pass on ${day(c.at) || day(r.createdAt)}`));
   const unproven = checks.filter((c) => c.status === 'unproven' || c.status === 'stale').sort((a, b) => b.required - a.required).map((c) => row(c, DOT, 'none', c.status === 'stale' ? `last proven ${day(c.at)}` : c.required ? 'not proven yet' : null));
+  if (unnamed) unproven.push(row({ title: `${unnamed} security check${unnamed === 1 ? '' : 's'}` }, DOT, 'none', `Not named on this page until Liftoff proves ${unnamed === 1 ? 'it' : 'them'}, so the page doesn't point at a weakness.`));
   const reported = checks.filter((c) => c.status === 'reported').map((c) => row(c, DOT, 'rep', `marked done by ${by(c.by) || 'hand'}${c.at ? ` on ${day(c.at)}` : ''}`));
   const open = checks.filter((c) => c.status === 'open').map((c) => row(c, DOT, 'none', null));
 
@@ -286,7 +297,7 @@ ${verdict}
 ${section('Proven by Liftoff', "Each of these was checked from Liftoff's own server against the live services, not ticked by hand.", proven)}
 ${purchase}
 ${section("Didn't pass", null, failed)}
-${section('Not proven yet', null, unproven)}
+${section('Not proven yet', null, unproven, { count: unproven.length - (unnamed ? 1 : 0) + unnamed })}
 ${section('Reported, not proven', `Done according to the team or ${assistant}. Liftoff counts these as half in the score and never certifies on them.`, reported)}
 ${section('Still open', 'Steps no one has marked done yet.', open, { folded: true })}
 <footer><p>Liftoff certifies a launch only when every required check (the site is live on HTTPS with privacy and terms pages, no secret keys ship in the code, and for apps that sell through Stripe, a webhook and a full test purchase) ran on its server and passed in the ${PROOF_MAX_AGE_DAYS} days before the report. Other checks are shown as they stood and count toward the score. This page is a snapshot from ${esc(longDate(r.createdAt))}.</p>
