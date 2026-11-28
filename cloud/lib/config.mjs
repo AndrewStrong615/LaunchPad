@@ -93,11 +93,13 @@ export function loadConfig(env = process.env) {
       uptimeMinutes: positive(env.LIFTOFF_UPTIME_MINUTES, 5),
       dailyHours: positive(env.LIFTOFF_DAILY_CHECK_HOURS, 24),
     },
-    // The Launch Pass, paid through Liftoff's own Stripe account. Off until the key is set.
+    // The Launch Pass and Pro, paid through Liftoff's own Stripe account. Off until the key is set.
     billing: {
       secretKey: env.LIFTOFF_STRIPE_SECRET_KEY || null,
       webhookSecret: env.LIFTOFF_STRIPE_WEBHOOK_SECRET || null,
       passUsd: positive(env.LIFTOFF_PASS_USD, 149),
+      // Pro, the monthly plan per app for watching it (lib/watch.mjs).
+      proUsd: positive(env.LIFTOFF_PRO_USD, 29),
       claudeUsd: positive(env.LIFTOFF_PASS_CLAUDE_USD, 50),
       freeLogins: (env.LIFTOFF_FREE_LOGINS || '').split(',').map((l) => l.trim().toLowerCase()).filter(Boolean),
       api: 'https://api.stripe.com',

@@ -23,7 +23,8 @@ It lives next to the plugin and reuses it: the same detection, launch steps, rea
 - **Liftoff runs the purchase test itself** for web apps on Stripe: its own browser signs up on the app's test-mode preview, buys Pro with Stripe's test card, checks Pro unlocks, cancels, and checks Pro locks again, with a screenshot of each step. Stripe's records for that checkout decide the result (see [The purchase test](#the-purchase-test)).
 - **Launch reports and the "Launch certified" badge**: a dated page anyone with the link can open, with every check, the evidence and a score, and a badge for the app's own site that links to it. It says "Launch certified" only when every required check ran on Liftoff's server and passed (see [Launch reports](#launch-reports-and-the-badge)).
 - **Watching and alerts**: once an app is live, Liftoff checks the site every 5 minutes and runs every check again each day (plus the HTTPS certificate and the domain's expiry), opens an incident when something breaks and closes it when it's fixed, and tells the owner in Slack or Discord (see [Watching and alerts](#watching-and-alerts)).
-- **The Launch Pass**: one payment per app, through Liftoff's own Stripe account, opens cloud runs (with tokens included), the purchase test and launch reports. Importing, the scan, verify, Pulse and the launch score stay free. The tour's last step shows the price. Off until a Stripe key is set (see [The Launch Pass](#the-launch-pass)).
+- **The Launch Pass**: one payment per app, through Liftoff's own Stripe account, opens cloud runs (with tokens included), the purchase test and launch reports, and comes with 30 days of watching. Importing, the scan, verify, Pulse and the launch score stay free. The tour's last step shows the price. Off until a Stripe key is set (see [The Launch Pass](#the-launch-pass)).
+- **Pro**: $29 a month per app for watching it once the Launch Pass days are over, as a Stripe subscription on the same account. Added during those days, nothing is charged until they end. Cancel, keep and the card are on the app's page (see [Pro](#pro)).
 - **Run records**: every cloud run leaves an anonymous record of the stack, how each step ended, the checklist before and after, the cost and the errors, so Liftoff can learn what works for which stack. Admins see success rates by stack, step, mode and model, and what a step really costs in dollars (see [Run records](#run-records)).
 - **Cloud runs with Pilot.** Pick steps (or all that are left), pick a mode, add a note, start. Pilot works in its own sandbox with a copy of the code and follows the plugin's skills. The run page shows what it's doing live; questions and approval requests appear as cards. GitHub apps get a branch and a draft pull request. Zips get a patch and an updated zip to download.
 
@@ -94,7 +95,20 @@ Liftoff Cloud charges once per app for the parts that cost money to run or that 
 - **Free accounts**: GitHub logins in `LIFTOFF_FREE_LOGINS` get every pass free (for the team and testers).
 - **Records**: passes live in `users/<uid>/billing.json` and go when the account is deleted. Every checkout and payment is also appended to `<data>/billing/log.jsonl` (user id, app, Stripe session, amount; no names or emails) for the books and the free-scan-to-pass numbers.
 
-To turn it on: in Stripe (test mode first), copy the secret key into `LIFTOFF_STRIPE_SECRET_KEY`; add a webhook endpoint at `https://<service>/billing/stripe-webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded` and copy its signing secret into `LIFTOFF_STRIPE_WEBHOOK_SECRET`. In test mode the card says so and Checkout takes the 4242 card. A refund in Stripe doesn't take the pass back yet.
+To turn it on: in Stripe (test mode first), copy the secret key into `LIFTOFF_STRIPE_SECRET_KEY`; add a webhook endpoint at `https://<service>/billing/stripe-webhook` for `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `customer.subscription.created`, `customer.subscription.updated` and `customer.subscription.deleted` (the last three are for [Pro](#pro)) and copy its signing secret into `LIFTOFF_STRIPE_WEBHOOK_SECRET`. In test mode the card says so and Checkout takes the 4242 card. A refund in Stripe doesn't take the pass back yet.
+
+## Pro
+
+Pro is the monthly plan for [watching](#watching-and-alerts) one app: `LIFTOFF_PRO_USD` a month (default $29), a Stripe subscription on Liftoff's own account. Every Launch Pass comes with the first 30 days, so people see it work before they're asked.
+
+- **Starting**: the *Watching* card offers it once the app has a live address: *Start Pro* when there's no pass, *Keep watching* when the pass's days are over, and *Add Pro* during them. Added during the pass's days, Checkout sets a trial that ends when they do, so the first payment waits until then (Stripe needs a trial to run at least 48 hours, so in the last two days it just starts). The person's Stripe customer is reused for later plans.
+- **Following Stripe**: when the person comes back from Checkout, and on every `customer.subscription.*` event, the server reads the subscription from Stripe itself rather than trusting the event's copy, so events arriving late or out of order can't leave it wrong. Watching is on while the subscription is active, trialing or past due (Stripe is retrying a failed payment, and the card says to update it). If Stripe goes quiet, it stays on for 3 days past the paid month, then stops.
+- **Cancelling**: *Cancel Pro* stops it renewing; watching carries on until the month paid for ends, and *Keep Pro* undoes it until then. *Billing* (and *Update the card* when a payment failed) opens Stripe's own customer portal for the card and invoices. Removing an app stops its plan renewing first, and if Stripe can't be reached the app isn't removed.
+- **What it doesn't do**: Pro is watching only. The Launch Pass parts (runs, the purchase test, reports) still need a pass. A second plan for the same app (two Checkout tabs) isn't used: it's written to the billing log as `pro-duplicate` to refund and cancel in Stripe.
+- **Records**: the plan sits in `users/<uid>/billing.json` under `pro`, and every change goes to `<data>/billing/log.jsonl`.
+- **Stripe's fees**: on top of the usual card fee (2.9% + 30¢ a payment in the US), Stripe Billing takes 0.7% of subscription payments on its pay-as-you-go plan, with no monthly fee. The customer portal is free (unless it's given a custom domain, $10 a month, which Liftoff doesn't use).
+
+To turn it on, besides the webhook events above: in the Stripe Dashboard, open Settings → Billing → Customer portal and save it once (in test mode and again in live mode), or *Billing* won't open.
 
 ## Watching and alerts
 
@@ -104,7 +118,7 @@ Once an app has a live address (the Deployments card, or a deploy Pilot records)
 - **Every check again**, once every `LIFTOFF_DAILY_CHECK_HOURS` (default 24): new code from GitHub when the branch moved (so a key pushed later is caught; skipped while a run is open), a full verify, Pulse, the HTTPS certificate (incident within 14 days of expiry or when browsers wouldn't trust it) and the domain's registration from RDAP (incident within 30 days; skipped for platform domains like `*.vercel.app`). A check that passed before and fails now opens an incident; one that never passed is still on the launch list, not news.
 - **Incidents** close by themselves when the problem goes away. Opening and closing shows in the app's activity. *Pause watching* stops the checks for that app and closes what's open without alerts.
 - **Alerts**: Account settings → *Alerts* takes a Slack incoming webhook or a Discord channel webhook (nothing else: the server posts to it). Liftoff sends a first message before saving it, then one message when an incident opens and one when it closes, at most 30 an hour per person. The address is stored encrypted with the person's keys and only its last four characters are shown back. Email alerts need a sending service and a domain, so they come later.
-- **Who is watched**: every app with a live address while payments are off; with payments on, `LIFTOFF_FREE_LOGINS`, and apps whose Launch Pass is under 30 days old (the 30 days of Pro that come with it). A monthly Pro plan comes next.
+- **Who is watched**: every app with a live address while payments are off; with payments on, `LIFTOFF_FREE_LOGINS`, apps whose Launch Pass is under 30 days old (the 30 days of Pro that come with it), and apps on [Pro](#pro).
 - **Where it runs**: inside the web server, on a one-minute tick, up to 8 uptime checks and 2 daily checks at a time. Render runs one instance of a service with a disk and stops the old one before starting the new one, so nothing runs twice. Each app's record is `watch.json` beside its state (samples for 24 hours, daily totals for 90 days, the last 50 incidents). `LIFTOFF_WATCH=0` turns it all off. A database and a separate worker are only needed once the web app runs on more than one instance.
 
 ## Run records
@@ -130,7 +144,7 @@ Open `http://localhost:8787` (not 127.0.0.1: the address must match `PUBLIC_URL`
 
 ```
 ANTHROPIC_API_KEY=sk-ant-... npm run dev      # cloud runs too
-npm test                                      # 81 tests, no network needed
+npm test                                      # 87 tests, no network needed
 ```
 
 ## Deploy on Render
@@ -169,6 +183,7 @@ The blueprint uses the Starter instance because Render disks need a paid instanc
 | `LIFTOFF_STRIPE_WEBHOOK_SECRET` | The signing secret of the Stripe webhook at `/billing/stripe-webhook`. |
 | `LIFTOFF_PASS_USD` | The Launch Pass price in US dollars (default 149). |
 | `LIFTOFF_PASS_CLAUDE_USD` | Claude time included with each pass, in US dollars of model spend (default 50, shown as 5,000 tokens). |
+| `LIFTOFF_PRO_USD` | The Pro price per app per month, in US dollars (default 29). |
 | `LIFTOFF_FREE_LOGINS` | GitHub logins that get every pass free, comma-separated. |
 | `LIFTOFF_WATCH` | `0` turns watching off (uptime checks, the daily checks and alerts). |
 | `LIFTOFF_UPTIME_MINUTES` | Minutes between uptime checks of a watched app (default 5). |
@@ -206,7 +221,7 @@ cloud/
     safe-fetch.mjs    fetch that refuses private addresses (verify, Pulse)
     proof.mjs         the purchase test: queue, Stripe cancel, screenshots, result
     report.mjs        launch reports: certification, the public page, the badge
-    billing.mjs       the Launch Pass: Stripe Checkout, webhook, tokens
+    billing.mjs       the Launch Pass and Pro: Stripe Checkout, subscriptions, webhook, tokens
     records.mjs       run records: one per run, scrubbed, and the admin numbers
     watch.mjs         watching: uptime, the daily checks, certificate and domain expiry, incidents
     alerts.mjs        alerts to Slack or Discord when an incident opens or closes

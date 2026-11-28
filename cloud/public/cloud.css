@@ -970,6 +970,10 @@ button.link { background: none; border: 0; padding: 0; font: inherit; color: var
   .watch .row .end { margin-left: 0; width: 100%; }
 }
 .watch-alerts { margin: 2px 0 8px; color: var(--muted); }
+.watch-plan { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line-2); }
+.watch-plan > .small { margin: 0 0 8px; color: var(--ink-2); }
+.watch-plan.bad { margin-top: 12px; padding: 12px; border: 0; border-radius: 12px; background: var(--bad-soft); }
+.watch-plan.bad > .small { color: var(--ink); }
 .alerts-form { margin-top: 10px; }
 .alerts-form .k { display: block; font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
 .alerts-card .line { margin-top: 10px; flex-wrap: wrap; }
