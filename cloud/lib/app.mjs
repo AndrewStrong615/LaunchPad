@@ -21,7 +21,7 @@ import { LIVE, publicRun } from './runs.mjs';
 import { MODELS, STRONGEST_TIER, TIERS, modelFor, tierOf } from './agent.mjs';
 import { toTokens } from './brand.mjs';
 import { isRunId, isSlug } from './store.mjs';
-import { badgeSvg, countClick, createReport, deleteReport, latestReport, loadReport, renderMissing, renderReport, reportShot, reportView } from './report.mjs';
+import { badgeNow, badgeSvg, countClick, createReport, deleteReport, latestReport, loadReport, renderMissing, renderReport, reportShot, reportView } from './report.mjs';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const PAGES = {
@@ -544,14 +544,19 @@ export function createApp(ctx) {
       }
       const report = loadReport(ctx, ref.uid, ref.slug, m[1]);
       if (!report) return gone();
-      return send(res, 200, renderReport(report, { assistant: config.assistant }), 'text/html; charset=utf-8', PUBLIC_CACHE);
+      // The newest report says where things stand now; an earlier one points to it.
+      const state = store.loadApp(ref.uid, ref.slug);
+      const latest = state && latestReport(state);
+      const newest = latest?.id === report.id;
+      const opts = { assistant: config.assistant, now: newest ? badgeNow(ctx, ref.uid, state) : null, newer: !newest && latest ? latest.id : null };
+      return send(res, 200, renderReport(report, opts), 'text/html; charset=utf-8', PUBLIC_CACHE);
     }
     if ((m = BADGE_PATH.exec(url.pathname))) {
       const ref = store.published(m[1]);
       const state = ref && store.loadApp(ref.uid, ref.slug);
       if (!state || state.report?.badgeId !== m[1]) throw new HttpError(404, 'Not found');
       const latest = latestReport(state);
-      if (m[2]) return send(res, 200, badgeSvg(latest), 'image/svg+xml; charset=utf-8', { ...PUBLIC_CACHE, 'cross-origin-resource-policy': 'cross-origin' });
+      if (m[2]) return send(res, 200, badgeSvg(badgeNow(ctx, ref.uid, state)), 'image/svg+xml; charset=utf-8', { ...PUBLIC_CACHE, 'cross-origin-resource-policy': 'cross-origin' });
       // A click from the app's site: count each visitor once every 10 minutes, not crawlers.
       try {
         if (BOT.test(String(req.headers['user-agent'] || ''))) throw new Error('bot');
