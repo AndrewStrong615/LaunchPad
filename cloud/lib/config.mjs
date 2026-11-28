@@ -92,6 +92,8 @@ export function loadConfig(env = process.env) {
       on: env.LIFTOFF_WATCH !== '0',
       uptimeMinutes: positive(env.LIFTOFF_UPTIME_MINUTES, 5),
       dailyHours: positive(env.LIFTOFF_DAILY_CHECK_HOURS, 24),
+      // How often open pull requests are looked at, where checking them is on (lib/prs.mjs).
+      prMinutes: positive(env.LIFTOFF_PR_CHECK_MINUTES, 10),
     },
     // The Launch Pass and Pro, paid through Liftoff's own Stripe account. Off until the key is set.
     billing: {

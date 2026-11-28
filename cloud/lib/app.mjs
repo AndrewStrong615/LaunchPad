@@ -99,6 +99,7 @@ export function createApp(ctx) {
         report: reportView(ctx, uid, state),
         pass: ctx.billing.view(uid, state),
         watch: ctx.watch.view(uid, state),
+        prs: ctx.prs.view(uid, state),
       },
     };
   }
@@ -476,6 +477,14 @@ export function createApp(ctx) {
         if (rest[1] === 'check' && rest.length === 2) {
           limit(`watch:${uid}`, 10, 60000);
           await ctx.watch.checkNow(uid, slug);
+          return ok(view(uid, store.loadApp(uid, slug)));
+        }
+        if (rest[1] === 'prs' && rest.length === 2) {
+          // Checking pull requests on GitHub (lib/prs.mjs): on or off.
+          const body = await readJson(req);
+          if (typeof body.on !== 'boolean') throw new HttpError(400, 'on is true or false.');
+          limit(`watch:${uid}`, 10, 60000);
+          ctx.prs.setOn(uid, slug, body.on);
           return ok(view(uid, store.loadApp(uid, slug)));
         }
       }

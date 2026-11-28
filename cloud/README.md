@@ -22,7 +22,7 @@ It lives next to the plugin and reuses it: the same detection, launch steps, rea
 - **Verify and Pulse** run on the server against the live site and the connected services, through a fetch that refuses private and internal addresses.
 - **Liftoff runs the purchase test itself** for web apps on Stripe: its own browser signs up on the app's test-mode preview, buys Pro with Stripe's test card, checks Pro unlocks, cancels, and checks Pro locks again, with a screenshot of each step. Stripe's records for that checkout decide the result (see [The purchase test](#the-purchase-test)).
 - **Launch reports and the "Launch certified" badge**: a dated page anyone with the link can open, with every check, the evidence and a score, and a badge for the app's own site that links to it. It says "Launch certified" only when every required check ran on Liftoff's server and passed (see [Launch reports](#launch-reports-and-the-badge)).
-- **Watching and alerts**: once an app is live, Liftoff checks the site every 5 minutes and runs every check again each day (plus the HTTPS certificate and the domain's expiry), opens an incident when something breaks and closes it when it's fixed, and tells the owner in Slack or Discord (see [Watching and alerts](#watching-and-alerts)).
+- **Watching and alerts**: once an app is live, Liftoff checks the site every 5 minutes and runs every check again each day (plus the HTTPS certificate and the domain's expiry), opens an incident when something breaks and closes it when it's fixed, and tells the owner in Slack or Discord. For apps from GitHub it can also check each pull request before it merges (see [Watching and alerts](#watching-and-alerts)).
 - **The Launch Pass**: one payment per app, through Liftoff's own Stripe account, opens cloud runs (with tokens included), the purchase test and launch reports, and comes with 30 days of watching. Importing, the scan, verify, Pulse and the launch score stay free. The tour's last step shows the price. Off until a Stripe key is set (see [The Launch Pass](#the-launch-pass)).
 - **Pro**: $29 a month per app for watching it once the Launch Pass days are over, as a Stripe subscription on the same account, which also keeps the "Launch certified" badge live for as long as every required check passes. Added during those days, nothing is charged until they end. Cancel, keep and the card are on the app's page (see [Pro](#pro)).
 - **Run records**: every cloud run leaves an anonymous record of the stack, how each step ended, the checklist before and after, the cost and the errors, so Liftoff can learn what works for which stack. Admins see success rates by stack, step, mode and model, and what a step really costs in dollars (see [Run records](#run-records)).
@@ -121,6 +121,7 @@ Once an app has a live address (the Deployments card, or a deploy Pilot records)
 - **Uptime**: the live site, or its `health.path` when set, every `LIFTOFF_UPTIME_MINUTES` (default 5). Two failed checks in a row open a "down" incident, dated from the first one; the first good answer closes it. The app page's *Watching* card shows the last 24 hours as half-hour bars, uptime over 24 hours and 30 days, and the usual answer time. The overview and sidebar say *Down* while it is.
 - **Every check again**, once every `LIFTOFF_DAILY_CHECK_HOURS` (default 24): new code from GitHub when the branch moved (so a key pushed later is caught; skipped while a run is open), a full verify, Pulse, the HTTPS certificate (incident within 14 days of expiry or when browsers wouldn't trust it) and the domain's registration from RDAP (incident within 30 days; skipped for platform domains like `*.vercel.app`). A check that passed before and fails now opens an incident; one that never passed is still on the launch list, not news.
 - **Incidents** close by themselves when the problem goes away. Opening and closing shows in the app's activity. *Pause watching* stops the checks for that app and closes what's open without alerts.
+- **Pull requests**, for apps imported from GitHub, once the owner presses *Check pull requests* on the *Watching* card: every `LIFTOFF_PR_CHECK_MINUTES` (default 10) Liftoff lists the repository's open pull requests and checks each new commit's code (downloaded, never run). It flags secret keys in the files the pull request changes (a key already on the branch isn't blamed on it; the daily check catches that) and launch checks read from code alone (the App Store pre-scan for mobile apps) that pass on the app's branch as Liftoff last read it but fail with the pull request. The answer goes back to GitHub as a commit status named "Liftoff" (pending, then success or failure, or error if the code couldn't be downloaded), linking to the app's page, and a pull request with problems sends one alert. It uses the GitHub sign-in or token Liftoff already has (the `repo` scope covers commit statuses), so there's no GitHub App to install. If GitHub refuses the status, the card still shows the answer and says so. Up to 20 open pull requests are looked at, 3 new commits per app per pass. Each app's record is `prs.json` beside its state.
 - **Alerts**: Account settings → *Alerts* takes a Slack incoming webhook or a Discord channel webhook (nothing else: the server posts to it). Liftoff sends a first message before saving it, then one message when an incident opens and one when it closes, at most 30 an hour per person. The address is stored encrypted with the person's keys and only its last four characters are shown back. Email alerts need a sending service and a domain, so they come later.
 - **Who is watched**: every app with a live address while payments are off; with payments on, `LIFTOFF_FREE_LOGINS`, apps whose Launch Pass is under 30 days old (the 30 days of Pro that come with it), and apps on [Pro](#pro).
 - **Where it runs**: inside the web server, on a one-minute tick, up to 8 uptime checks and 2 daily checks at a time. Render runs one instance of a service with a disk and stops the old one before starting the new one, so nothing runs twice. Each app's record is `watch.json` beside its state (samples for 24 hours, daily totals for 90 days, the last 50 incidents). `LIFTOFF_WATCH=0` turns it all off. A database and a separate worker are only needed once the web app runs on more than one instance.
@@ -148,7 +149,7 @@ Open `http://localhost:8787` (not 127.0.0.1: the address must match `PUBLIC_URL`
 
 ```
 ANTHROPIC_API_KEY=sk-ant-... npm run dev      # cloud runs too
-npm test                                      # 91 tests, no network needed
+npm test                                      # 95 tests, no network needed
 ```
 
 ## Deploy on Render
@@ -188,6 +189,7 @@ The blueprint uses the Starter instance because Render disks need a paid instanc
 | `LIFTOFF_PASS_USD` | The Launch Pass price in US dollars (default 149). |
 | `LIFTOFF_PASS_CLAUDE_USD` | Claude time included with each pass, in US dollars of model spend (default 50, shown as 5,000 tokens). |
 | `LIFTOFF_PRO_USD` | The Pro price per app per month, in US dollars (default 29). |
+| `LIFTOFF_PR_CHECK_MINUTES` | How often open pull requests are looked at, where the owner turned the check on (default 10). |
 | `LIFTOFF_FREE_LOGINS` | GitHub logins that get every pass free, comma-separated. |
 | `LIFTOFF_WATCH` | `0` turns watching off (uptime checks, the daily checks and alerts). |
 | `LIFTOFF_UPTIME_MINUTES` | Minutes between uptime checks of a watched app (default 5). |
@@ -202,6 +204,7 @@ The blueprint uses the Starter instance because Render disks need a paid instanc
 - Repository text, command output and web pages are treated as data by the agent, and Claude's Liftoff tools can only touch the app the run belongs to.
 - Storage is plain files on one disk, sized for one instance, and watching's schedule runs in that instance. Run one instance; to scale out, move `lib/store.mjs` to a database and the schedule to a worker first.
 - Watching reaches only public addresses (the same guard as verify, for the certificate check too), and alerts post only to Slack and Discord webhook addresses.
+- Pull request checks only read code (the commit's archive is unpacked and scanned, nothing in it runs), and Liftoff writes nothing to GitHub but the "Liftoff" commit status, and only for apps whose owner turned the check on.
 
 ## Layout
 
@@ -229,6 +232,7 @@ cloud/
     records.mjs       run records: one per run, scrubbed, and the admin numbers
     watch.mjs         watching: uptime, the daily checks, certificate and domain expiry, incidents
     alerts.mjs        alerts to Slack or Discord when an incident opens or closes
+    prs.mjs           pull request checks: secret keys and broken launch checks, as a GitHub commit status
     store.mjs         file storage
     crypto.mjs, http.mjs, config.mjs
   public/             the web app's pages (the Flight Board itself is ../dashboard)
