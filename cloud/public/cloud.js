@@ -1323,6 +1323,35 @@
       return planBlock(`Pro: ${price}, ${when}.`, [manage, h('button', { class: 'btn quiet', onclick: renew(false) }, 'Cancel Pro')].filter(Boolean));
     };
 
+    // Pull requests on GitHub (lib/prs.mjs): checked before they merge, when on.
+    const prs = app.cloud?.prs;
+    const prToggle = (on) => (e) => busy(e.currentTarget, async () => {
+      await post(`/api/apps/${app.slug}/watch/prs`, { on });
+      toast(on ? 'Checking the open pull requests now' : 'Stopped checking pull requests');
+      await refresh(true);
+    });
+    const prSaid = (p) => (p.result === 'ok' ? 'nothing broken' : p.result === 'problems' ? p.problems.map((x) => `${x.title}: ${x.detail}`).join('; ') : p.detail || 'couldn’t check it');
+    const prBlock = () => {
+      if (!prs) return null;
+      const head = h('div', { class: 'k' }, 'Pull requests');
+      if (!prs.on) {
+        return h('div', { class: 'watch-prs' }, head,
+          h('p', { class: 'small' }, 'Liftoff can check each pull request before it’s merged, for secret keys in the files it changes and launch checks it would break. The answer shows on GitHub next to your other checks.'),
+          h('div', { class: 'row' }, h('button', { class: 'btn', onclick: prToggle(true) }, icon('pr'), 'Check pull requests')));
+      }
+      const list = prs.prs || [];
+      const posted = list.find((p) => p.statusError);
+      return h('div', { class: 'watch-prs' }, head,
+        prs.error ? h('p', { class: 'small watch-note' }, prs.error) : null,
+        list.length ? h('ul', { class: 'watch-lines' }, list.map((p) => h('li', { key: `pr${p.number}`, class: p.result === 'problems' ? 'bad' : p.result === 'error' ? 'wait' : '' },
+          icon(p.result === 'problems' ? 'x' : p.result === 'ok' ? 'checkCircle' : 'clock'),
+          h('span', {}, h('a', { href: p.url, target: '_blank', rel: 'noopener' }, `#${p.number} ${p.title}`), `: ${prSaid(p)}`))))
+          : h('p', { class: 'small' }, prs.running || !prs.checkedAt ? 'Checking the open pull requests…' : 'No open pull requests right now.'),
+        posted ? h('p', { class: 'small watch-note' }, `GitHub didn’t take Liftoff’s answer on #${posted.number} (${posted.statusError}), so it only shows here.`) : null,
+        h('p', { class: 'small watch-what' }, `New commits are checked within ${prs.everyMinutes} minutes. On GitHub the answer is the check named “Liftoff”.`),
+        h('div', { class: 'row' }, h('button', { class: 'btn quiet', onclick: prToggle(false) }, 'Stop checking pull requests')));
+    };
+
     if (!w.watching) {
       const body = [h('p', { class: 'small watch-what' }, what)];
       if (w.why === 'no-live-url') body.push(h('p', { class: 'small watch-note' }, 'Add the live address under Deployments and watching starts on its own.'));
@@ -1366,6 +1395,7 @@
           h('summary', {}, `Fixed recently (${recent.length})`),
           h('ul', {}, recent.map((i) => h('li', { key: i.id }, h('span', { class: 'grow' }, i.title), h('span', { class: 'small' }, `${shortDay(i.openedAt)}, ${span(i.openedAt, i.closedAt)}`))))) : null,
         h('p', { class: 'small watch-alerts' }, C.me?.alerts?.channel ? `Alerts go to ${C.me.alerts.channel.label}.` : 'Get alerts in Slack or Discord: ', C.me?.alerts?.channel ? null : h('button', { class: 'link', type: 'button', onclick: () => go('settings') }, 'add a webhook in Account settings')),
+        prBlock(),
         h('div', { class: 'row' },
           h('button', { class: 'btn', onclick: checkNow }, icon('refresh'), 'Check now'),
           h('button', { class: 'btn quiet', onclick: pause(true) }, 'Pause watching')),

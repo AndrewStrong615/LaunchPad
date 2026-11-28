@@ -118,6 +118,7 @@ export class Watcher {
     this.daily = new Map(); // `${uid}:${slug}` → promise of its daily check
     this.ticking = null;
     this.timer = null;
+    this.prs = null; // the pull request pass that's out, if any
   }
 
   get uptimeMs() {
@@ -149,7 +150,7 @@ export class Watcher {
     // Let checks that are out finish, but don't hold up a shutdown for long:
     // every write is atomic, and an unfinished daily check runs again next time.
     const wait = new Promise((r) => setTimeout(r, 5000).unref());
-    await Promise.race([Promise.allSettled([this.ticking, ...this.daily.values()]), wait]);
+    await Promise.race([Promise.allSettled([this.ticking, ...this.daily.values(), this.prs, this.ctx.prs?.idle()]), wait]);
   }
 
   // ---------- records ----------
@@ -262,6 +263,8 @@ export class Watcher {
       try {
         const { uptime, daily } = this.due();
         for (const app of daily) this.startDaily(app.uid, app.slug);
+        // Pull requests (lib/prs.mjs) carry on in the background like daily checks.
+        if (this.cfg.on && this.ctx.prs && !this.prs) this.prs = this.ctx.prs.runDue().catch((e) => console.error('[liftoff-cloud] pull requests:', e?.stack || e)).finally(() => { this.prs = null; });
         await pool(uptime, UPTIME_AT_ONCE, ({ uid, slug }) => this.checkUptime(uid, slug).catch((e) => console.error(`[liftoff-cloud] uptime ${slug}:`, e?.message || e)));
       } finally {
         this.ticking = null;
@@ -272,7 +275,7 @@ export class Watcher {
 
   async runDue() {
     await this.tick();
-    await Promise.allSettled([...this.daily.values()]);
+    await Promise.allSettled([...this.daily.values(), this.prs]);
   }
 
   startDaily(uid, slug) {
