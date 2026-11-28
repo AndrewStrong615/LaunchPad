@@ -33,7 +33,7 @@ test('theme and default mode are saved to the account, and new runs use that mod
 
   const me = await signIn(srv.base);
   let r = await me.get('/api/me');
-  assert.deepEqual(r.body.prefs, { theme: 'system', tier: null });
+  assert.deepEqual(r.body.prefs, { theme: 'system', tier: null, onboarded: false });
   assert.equal(r.body.user.via, 'local');
   assert.ok(r.body.user.createdAt);
   assert.equal(r.body.tiers.default, 'cruise');
@@ -51,7 +51,7 @@ test('theme and default mode are saved to the account, and new runs use that mod
   assert.equal(r.body.prefs.theme, 'dark', 'changing one setting keeps the other');
   assert.equal(r.body.tiers.default, 'boost');
   r = await me.get('/api/me');
-  assert.deepEqual(r.body.prefs, { theme: 'dark', tier: 'boost' });
+  assert.deepEqual(r.body.prefs, { theme: 'dark', tier: 'boost', onboarded: false });
   // Saved as the model behind the mode, as before, so older accounts keep their choice.
   assert.equal(srv.ctx.store.getUser(userDirs(srv)[0]).prefs.model, 'claude-opus-5-5');
 
@@ -68,6 +68,30 @@ test('theme and default mode are saved to the account, and new runs use that mod
   r = await me.post('/api/me/prefs', { tier: null });
   assert.equal(r.body.prefs.tier, null);
   assert.equal(r.body.tiers.default, 'cruise');
+});
+
+test('the welcome tour is shown once: finishing or skipping it is saved to the account', async (t) => {
+  const srv = await startTest();
+  t.after(() => srv.stop());
+  const me = await signIn(srv.base);
+  let r = await me.get('/api/me');
+  assert.equal(r.body.prefs.onboarded, false, 'a new account starts with the tour');
+  r = await me.post('/api/me/prefs', { onboarded: 'yes' });
+  assert.equal(r.status, 400);
+  r = await me.post('/api/me/prefs', { onboarded: true });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(r.body.prefs.onboarded, true);
+  r = await me.post('/api/me/prefs', { theme: 'light' });
+  assert.equal(r.body.prefs.onboarded, true, 'other settings keep it');
+  assert.equal((await me.get('/api/me')).body.prefs.onboarded, true);
+  // Account settings can start it again.
+  r = await me.post('/api/me/prefs', { onboarded: false });
+  assert.equal(r.body.prefs.onboarded, false);
+
+  // The sign-in page is plain HTML with no inline styles or scripts (the CSP blocks them).
+  const html = await (await fetch(`${srv.base}/login`)).text();
+  assert.doesNotMatch(html, /\sstyle=|<script>(?!<\/script>)|\son[a-z]+=/i);
+  assert.match(html, /<script src="\/login\.js"><\/script>/);
 });
 
 test('signing out other devices keeps this one', async (t) => {

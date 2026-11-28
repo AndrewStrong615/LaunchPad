@@ -662,5 +662,5 @@ function start() {
   setTimeout(tick, hook('pollMs') || 4000);
 }
 
-window.Board = { configure, start, state, h, icon, api, mutate, go, render, refresh, toast, copy, ago, colorFor, avatar, host, plural, money, morph, repaint, setTheme, PLATFORM, STEP_WORD, ICONS };
+window.Board = { configure, start, state, h, icon, api, mutate, go, render, refresh, toast, copy, ago, colorFor, avatar, host, plural, money, morph, repaint, setTheme, themeButton, PLATFORM, STEP_WORD, ICONS };
 if (!document.body.hasAttribute('data-board-manual')) start();

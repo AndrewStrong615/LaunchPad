@@ -36,17 +36,19 @@ const SID_COOKIE = 'lc_sid';
 const STATE_COOKIE = 'lc_oauth';
 const THEMES = ['system', 'light', 'dark'];
 
-// Account settings kept on the user: how the app looks and the model runs
-// default to (saved as the model id, shown as its mode: publicPrefs).
+// Account settings kept on the user: how the app looks, the model runs
+// default to (saved as the model id, shown as its mode: publicPrefs), and
+// whether the welcome tour is done (finished or skipped).
 // Anything unknown reads as "not set".
 function prefsOf(user) {
   const p = user.prefs || {};
   return {
     theme: THEMES.includes(p.theme) ? p.theme : 'system',
     model: MODELS.some((m) => m.id === p.model) ? p.model : null,
+    onboarded: p.onboarded === true,
   };
 }
-const publicPrefs = (prefs) => ({ theme: prefs.theme, tier: tierOf(prefs.model) });
+const publicPrefs = (prefs) => ({ theme: prefs.theme, tier: tierOf(prefs.model), onboarded: prefs.onboarded });
 
 // A small fixed-window limiter, per process.
 function limiter() {
@@ -246,6 +248,10 @@ export function createApp(ctx) {
         const model = body.tier === null ? null : modelFor(String(body.tier));
         if (body.tier !== null && !model) throw new HttpError(400, `Pick one of these modes: ${TIERS.map((t) => t.label).join(', ')}.`);
         prefs.model = model;
+      }
+      if ('onboarded' in body) {
+        if (typeof body.onboarded !== 'boolean') throw new HttpError(400, 'onboarded is true or false.');
+        prefs.onboarded = body.onboarded;
       }
       const saved = store.saveUser({ ...store.getUser(uid), prefs });
       return ok({ prefs: publicPrefs(prefsOf(saved)), tiers: meTiers(uid) });

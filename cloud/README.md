@@ -12,6 +12,8 @@ It lives next to the plugin and reuses it: the same detection, launch steps, rea
 
 ## What it does
 
+- **Sign-in** (`/login`): GitHub (or the one-click local sign-in in development) on the left, a quiet picture of Liftoff at work on the right, which drops away on phones. "What Liftoff can see on GitHub" spells out the OAuth scopes in plain words.
+- **The welcome tour** for a new account with no apps, in four steps: what Liftoff does; add an app (search your GitHub repos, paste a link or upload a zip) and see what the free scan found; connect the services that app uses (optional); and what's free versus the Launch Pass. It covers the whole window and opens by itself once. Finishing or skipping it saves `prefs.onboarded` on the account, and Account settings has *Start tour* to see it again.
 - **Add an app** from a GitHub link (public, or private once you sign in with GitHub), from a list of your repos, or by uploading a zip. The code is unpacked safely (no `../` paths, no links, size and file limits), read with the plugin's detection, and scanned: App Store pre-scan and leaked keys.
 - **The Flight Board** for every app: launch steps, your tasks, release readiness, deploys, Pulse and "do this next", plus where the code came from, what the scan found, and per-app settings.
 - **Accounts**: each person adds a key once and all their apps use it. Keys are encrypted at rest (AES-256-GCM) and never sent back to the browser.
