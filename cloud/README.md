@@ -19,6 +19,7 @@ It lives next to the plugin and reuses it: the same detection, launch steps, rea
 - **Verify and Pulse** run on the server against the live site and the connected services, through a fetch that refuses private and internal addresses.
 - **Liftoff runs the purchase test itself** for web apps on Stripe: its own browser signs up on the app's test-mode preview, buys Pro with Stripe's test card, checks Pro unlocks, cancels, and checks Pro locks again, with a screenshot of each step. Stripe's records for that checkout decide the result (see [The purchase test](#the-purchase-test)).
 - **Launch reports and the "Launch certified" badge**: a dated page anyone with the link can open, with every check, the evidence and a score, and a badge for the app's own site that links to it. It says "Launch certified" only when every required check ran on Liftoff's server and passed (see [Launch reports](#launch-reports-and-the-badge)).
+- **The Launch Pass**: one payment per app, through Liftoff's own Stripe account, opens cloud runs (with Claude time included), the purchase test and launch reports. Importing, the scan, verify, Pulse and the launch score stay free. Off until a Stripe key is set (see [The Launch Pass](#the-launch-pass)).
 - **Cloud runs with Claude.** Pick steps (or all that are left), pick a model, add a note, start. Claude works in its own sandbox with a copy of the code and follows the plugin's skills. The run page shows what it's doing live; questions and approval requests appear as cards. GitHub apps get a branch and a draft pull request. Zips get a patch and an updated zip to download.
 
 ## How a run works
@@ -56,11 +57,27 @@ The test browser is isolated on purpose, because it opens sites Liftoff doesn't 
 
 - **Certified** when the app is a web app and every required check was proven by Liftoff (ticked by `verify` or the scan, not by hand) in the last 30 days. Required: the live deploy answers, HTTPS with http and www redirecting, `/privacy` and `/terms` load, no secret keys in the shipped code; for apps that sell through Stripe, the webhook rejects unsigned requests and the purchase test (or the app's CI) left a paid, cancelled checkout in Stripe; for Supabase apps, row-level security is on. A skipped check never counts as a pass. Other checks don't block, so a test-mode Stripe key (which `pay-live` fails) doesn't stop a certificate.
 - **On the page**: what each proven check found and when, Liftoff's latest purchase test with its screenshots, then what didn't pass, what isn't proven yet, what was marked done by hand, and what's still open. Why a check failed is never shown (it could point at a weakness, like a leaked key's file or a table without RLS); the owner sees that on the Flight Board. Skip reasons stay private too.
-- **Score**: proven items count fully, hand-ticked items half, out of every checklist item.
+- **Launch score**: proven items count fully, hand-ticked items half, out of every checklist item. It is separate from the Flight Board's release readiness, which counts every tick the same.
 - **The badge**: `/b/<id>.svg` shows the newest report, "launch certified" with its date or a plain "launch report" that claims nothing, and `/b/<id>` sends visitors to that report. Visits are counted once per visitor every 10 minutes, without crawlers. The card has the code to paste into the site.
 - **Taking a report down** stops its link; the badge falls back to the report before it. The last 20 reports are kept. Removing the app or the account takes every link down.
 
 Report pages, screenshots and badges are served with a 5 minute public cache and `noindex`. Shared links are random ids (`rp_…`, `bd_…`) kept in `<data>/public/`, each pointing at the app that owns it; the content lives with the app in `apps/<slug>/reports/`.
+
+## The Launch Pass
+
+Liftoff Cloud charges once per app for the parts that cost money to run or that only Liftoff can grant. Billing is off (everything free) until `LIFTOFF_STRIPE_SECRET_KEY` is set.
+
+| Free | With the Launch Pass |
+| --- | --- |
+| Import from GitHub or a zip, the App Store pre-scan and leaked keys, verify, Pulse, the Flight Board, the launch score and the top problems found | Cloud runs with Claude, with `LIFTOFF_PASS_CLAUDE_USD` of Claude time included (default $50); Liftoff's purchase test; launch reports and the "Launch certified" badge |
+
+- **Buying**: the Launch Pass card on the app's page (or the button that replaces *Start the launch*) opens Stripe Checkout for `LIFTOFF_PASS_USD` (default $149; promotion codes are allowed). It's a one-time payment on Liftoff's own Stripe account, not the person's.
+- **Granting**: when the person comes back from Checkout, the server reads that session from Stripe and grants the pass if it's theirs and paid. Stripe's webhook (`POST /billing/stripe-webhook`, signature checked with `LIFTOFF_STRIPE_WEBHOOK_SECRET`) grants it too, for when the tab was closed or the payment cleared later. Each checkout counts once.
+- **Claude time**: a run's budget is the usual per-run budget or what's left on the pass, whichever is less, and raising a paused run's budget stops at what's left. Open runs count at their budget, so two runs can't overspend. When it's used up, buying another pass adds the same amount again. Removing an app keeps what its runs cost counted against its pass, so importing it again doesn't reset it.
+- **Free accounts**: GitHub logins in `LIFTOFF_FREE_LOGINS` get every pass free (for the team and testers).
+- **Records**: passes live in `users/<uid>/billing.json` and go when the account is deleted. Every checkout and payment is also appended to `<data>/billing/log.jsonl` (user id, app, Stripe session, amount; no names or emails) for the books and the free-scan-to-pass numbers.
+
+To turn it on: in Stripe (test mode first), copy the secret key into `LIFTOFF_STRIPE_SECRET_KEY`; add a webhook endpoint at `https://<service>/billing/stripe-webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded` and copy its signing secret into `LIFTOFF_STRIPE_WEBHOOK_SECRET`. In test mode the card says so and Checkout takes the 4242 card. A refund in Stripe doesn't take the pass back yet.
 
 ## Run it locally
 
@@ -74,7 +91,7 @@ Open `http://localhost:8787` (not 127.0.0.1: the address must match `PUBLIC_URL`
 
 ```
 ANTHROPIC_API_KEY=sk-ant-... npm run dev      # cloud runs too
-npm test                                      # 34 tests, no network needed
+npm test                                      # 40 tests, no network needed
 ```
 
 ## Deploy on Render
@@ -106,6 +123,11 @@ The blueprint uses the Starter instance because Render disks need a paid instanc
 | `LIFTOFF_EXTRA_HOSTS` | More hosts the sandbox may reach, comma-separated. |
 | `LIFTOFF_PROOF_URL` | Where Liftoff's test browser listens (`host:port` on Render's private network). Unset turns the purchase test off. |
 | `LIFTOFF_PROOF_SECRET` | 32+ random characters, the same on the test browser. Signs every request to it. |
+| `LIFTOFF_STRIPE_SECRET_KEY` | Liftoff's own Stripe secret key, for selling the Launch Pass. Unset turns billing off and everything is free. |
+| `LIFTOFF_STRIPE_WEBHOOK_SECRET` | The signing secret of the Stripe webhook at `/billing/stripe-webhook`. |
+| `LIFTOFF_PASS_USD` | The Launch Pass price in US dollars (default 149). |
+| `LIFTOFF_PASS_CLAUDE_USD` | Claude time included with each pass, in US dollars of model spend (default 50). |
+| `LIFTOFF_FREE_LOGINS` | GitHub logins that get every pass free, comma-separated. |
 
 ## Security notes
 
@@ -134,6 +156,7 @@ cloud/
     safe-fetch.mjs    fetch that refuses private addresses (verify, Pulse)
     proof.mjs         the purchase test: queue, Stripe cancel, screenshots, result
     report.mjs        launch reports: certification, the public page, the badge
+    billing.mjs       the Launch Pass: Stripe Checkout, webhook, Claude time
     store.mjs         file storage
     crypto.mjs, http.mjs, config.mjs
   public/             the web app's pages (the Flight Board itself is ../dashboard)

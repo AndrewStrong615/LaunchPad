@@ -462,6 +462,56 @@
       }))));
   }
 
+  // The Launch Pass (lib/billing.mjs): one payment per app opens cloud runs,
+  // the purchase test and launch reports. The scan, verify and the readiness
+  // score stay free, and this card shows them as the reason to buy.
+  const usd0 = (n) => `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  const locked = (app) => !!app.cloud?.pass && !app.cloud.pass.unlocked;
+  const claudeLeft = (app) => app.cloud?.pass?.pass?.claude?.left ?? Infinity;
+  const buyPass = (slug) => (e) => busy(e.currentTarget, async () => {
+    const { url } = await post(`/api/apps/${slug}/pass`);
+    location.href = url;
+  });
+  const passHint = () => h('span', { class: 'small pass-hint' }, icon('rocket'), 'Part of the Launch Pass');
+
+  function passCard(app) {
+    const p = app.cloud?.pass;
+    if (!p?.enabled || p.free) return null;
+    if (p.pass) {
+      const t = p.pass.claude;
+      const share = t.included ? Math.min(100, Math.round((100 * t.used) / t.included)) : 100;
+      return h('section', { class: 'card pass on' },
+        h('div', { class: 'card-head' }, icon('rocket'), h('h2', {}, 'Launch Pass'), h('span', { class: 'pill sm good' }, 'Active'), h('span', { class: 'end sub' }, `Bought ${ago(p.pass.at)}`)),
+        h('div', { class: 'card-body' },
+          h('div', { class: 'pass-meter' },
+            h('div', { class: 'small' }, `Claude time: ${usd(t.used)} of ${usd0(t.included)} used`),
+            h('div', { class: `bar${share >= 90 ? ' low' : ''}`, role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': String(t.included), 'aria-valuenow': String(t.used), 'aria-label': 'Claude time used' }, h('span', { class: `fill w${Math.round(share / 5) * 5}` }))),
+          t.left < 1 ? h('div', { class: 'row' },
+            h('span', { class: 'small grow' }, `The Claude time on this pass is used up. Another pass adds ${usd0(p.price.claudeUsd)} more.`),
+            h('button', { class: 'btn', onclick: buyPass(app.slug) }, icon('rocket'), `Add a pass · ${usd0(p.price.usd)}`)) : null));
+    }
+    const now = app.cloud?.report?.now;
+    const scanIds = new Set((app.cloud?.scan?.failing || []).map((f) => f.id));
+    const problems = app.checklist.filter((c) => c.verify?.ok === false || scanIds.has(c.id)).slice(0, 3);
+    return h('section', { class: 'card pass' },
+      h('div', { class: 'card-head' }, icon('rocket'), h('h2', {}, 'Launch Pass'), h('span', { class: 'end sub' }, `${usd0(p.price.usd)} once, for this app`)),
+      h('div', { class: 'card-body pass-body' },
+        h('div', { class: 'pass-free' },
+          now ? h('div', { class: 'report-score' }, h('div', { class: 'num' }, String(now.score), h('span', {}, '/100')), h('div', { class: 'small' }, 'Launch score: what Liftoff has proven so far, free from the scan and verify')) : null,
+          problems.length ? [
+            h('div', { class: 'k' }, 'Top problems found'),
+            h('ul', { class: 'report-missing' }, problems.map((c) => h('li', { key: c.id }, icon('x'), h('span', {}, c.title)))),
+          ] : null),
+        h('div', { class: 'pass-buy' },
+          h('div', { class: 'k' }, 'The pass adds'),
+          h('ul', { class: 'pass-list' },
+            p.includes.map((x) => h('li', { key: x }, icon('check'), h('span', {}, x))),
+            h('li', { key: 'claude' }, icon('check'), h('span', {}, `${usd0(p.price.claudeUsd)} of Claude time included`))),
+          h('div', { class: 'row' },
+            h('button', { class: 'btn primary', onclick: buyPass(app.slug) }, icon('rocket'), `Get the Launch Pass · ${usd0(p.price.usd)}`)),
+          p.testMode ? h('p', { class: 'small pass-test' }, 'Stripe test mode: pay with 4242 4242 4242 4242, any future date and any CVC.') : null)));
+  }
+
   // Liftoff's own purchase test: its browser buys Pro on the app's test-mode
   // deploy, and Stripe's records decide. Screenshots open full size.
   const PROOF_WORD = { queued: 'Waiting its turn', running: 'Testing', passed: 'Passed', failed: 'Failed', error: "Didn't finish" };
@@ -495,7 +545,8 @@
             s.shot ? h('a', { class: 'shot', href: s.shot, target: '_blank', rel: 'noopener', title: `Open the screenshot: ${s.label}` }, h('img', { src: s.shot, alt: `Screenshot: ${s.label}`, loading: 'lazy' })) : null)),
           live ? h('li', { key: `${last.id}:next`, class: 'now' }, icon('spinner'), h('div', { class: 'grow' }, h('div', { class: 'name' }, last.status === 'queued' ? 'Waiting for the test browser' : `${PROOF_NEXT[steps.length] || 'Finishing'}…`))) : null) : null,
         last && !live && last.status === 'error' ? h('p', { class: 'small proof-block' }, last.detail) : null,
-        h('div', { class: 'row' }, h('button', { class: `btn${last?.status === 'passed' ? '' : ' primary'}`, disabled: !!p.blocker || live, onclick: start }, icon('play'), live ? 'Testing…' : last ? 'Run it again' : 'Run the purchase test'))));
+        h('div', { class: 'row' }, h('button', { class: `btn${last?.status === 'passed' ? '' : ' primary'}`, disabled: !!p.blocker || live || locked(app), onclick: start }, icon('play'), live ? 'Testing…' : last ? 'Run it again' : 'Run the purchase test'),
+          locked(app) ? passHint() : null)));
   }
 
   // The launch report: a dated public page of what Liftoff proved, and the
@@ -543,7 +594,8 @@
           missing.map((m) => h('li', { key: m }, icon('circle'), h('span', {}, m))),
           now.missing.length > missing.length ? h('li', { key: 'more', class: 'more' }, h('span', {}, `and ${now.missing.length - missing.length} more`)) : null) : null,
         h('div', { class: 'row' },
-          h('button', { class: `btn${now.certified || !latest ? ' primary' : ''}`, onclick: create }, icon('flag'), latest ? 'Make a new report' : 'Make the report'),
+          h('button', { class: `btn${now.certified || !latest ? ' primary' : ''}`, disabled: locked(app), onclick: create }, icon('flag'), latest ? 'Make a new report' : 'Make the report'),
+          locked(app) ? passHint() : null,
           latest ? h('a', { class: 'btn', href: latest.url, target: '_blank', rel: 'noopener' }, 'Open the report', icon('external')) : null),
         badge ? h('div', { class: 'report-badge' },
           h('div', { class: 'k' }, 'Badge for your site'),
@@ -679,9 +731,12 @@
         ] : null,
         h('label', { class: 'field' }, h('span', {}, 'Note for Claude ', h('span', { class: 'hint' }, '(optional)')),
           h('textarea', { class: 'in', oninput: (e) => { C.note = e.currentTarget.value; }, placeholder: 'Anything Claude should know? e.g. "Use Cloudflare, not Vercel" or "Price Pro at $8/month"', 'aria-label': 'Note for Claude', maxlength: '1000' }, C.note || '')),
-        h('div', { class: 'launch-go' },
-          h('button', { class: 'btn primary big', type: 'button', disabled: !C.me?.claude.ok || !chosen.length, onclick: start }, icon('play'), chosen.length === left.length ? 'Start the launch' : `Run ${chosen.length} step${chosen.length === 1 ? '' : 's'}`),
-          h('span', { class: 'small' }, `Budget ${usd(C.me?.limits.runBudgetUsd)} per run`))));
+        locked(app) ? h('div', { class: 'launch-go' },
+          h('button', { class: 'btn primary big', type: 'button', onclick: buyPass(app.slug) }, icon('rocket'), `Get the Launch Pass · ${usd0(app.cloud.pass.price.usd)}`),
+          h('span', { class: 'small' }, `Cloud runs are part of the Launch Pass, with ${usd0(app.cloud.pass.price.claudeUsd)} of Claude time included.`))
+        : h('div', { class: 'launch-go' },
+          h('button', { class: 'btn primary big', type: 'button', disabled: !C.me?.claude.ok || !chosen.length || claudeLeft(app) < 1, onclick: start }, icon('play'), chosen.length === left.length ? 'Start the launch' : `Run ${chosen.length} step${chosen.length === 1 ? '' : 's'}`),
+          h('span', { class: 'small' }, claudeLeft(app) === Infinity ? `Budget ${usd(C.me?.limits.runBudgetUsd)} per run` : claudeLeft(app) < 1 ? 'This app’s Claude time is used up.' : `Up to ${usd(Math.min(C.me?.limits.runBudgetUsd ?? Infinity, claudeLeft(app)))} for this run · ${usd(claudeLeft(app))} of Claude time left on the pass`))));
   }
 
   async function startRun(slug, body) {
@@ -1128,7 +1183,7 @@
       h('button', { class: 'btn', title: 'Fetch the code again and rescan it', onclick: (e) => busy(e.currentTarget, async () => { toast('Rescanning…'); await post(`/api/apps/${app.slug}/rescan`); await refresh(true); toast('Rescanned'); }) }, icon('refresh'), 'Rescan'),
       h('button', { class: 'btn primary', onclick: () => openRun(app.slug, app.cloud?.run && OPEN.has(app.cloud.run.status) ? app.cloud.run.id : null) }, icon('play'), app.cloud?.run && OPEN.has(app.cloud.run.status) ? 'Open run' : 'Run with Claude'),
     ],
-    afterHero: (app) => [runCard(app), scanCard(app), proofCard(app), reportCard(app)],
+    afterHero: (app) => [runCard(app), passCard(app), scanCard(app), proofCard(app), reportCard(app)],
     nextActionButton: (app, a) => (a.skill || a.command ? h('button', { class: 'btn', onclick: () => {
       const ids = app.steps.filter((s) => s.skill === a.skill && !['done', 'skipped'].includes(s.status)).map((s) => s.id);
       openRun(app.slug).then(() => { if (ids.length && !C.run) { C.pick = Object.fromEntries(app.steps.map((s) => [s.id, ids.includes(s.id)])); render(); } });
@@ -1150,6 +1205,14 @@
       }
     },
   });
+
+  // Back from Stripe Checkout.
+  const back = new URLSearchParams(location.search).get('pass');
+  if (back) {
+    history.replaceState(null, '', location.pathname + location.hash);
+    const said = { ok: 'Launch Pass active. Runs, the purchase test and reports are open for this app.', pending: 'Stripe is still confirming the payment. The pass turns on as soon as it does.', error: 'Couldn’t confirm that checkout. If you paid, the pass turns on once Stripe tells Liftoff.' }[back];
+    if (said) setTimeout(() => toast(said), 600);
+  }
 
   Board.start();
 })();

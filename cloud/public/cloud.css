@@ -583,3 +583,42 @@ dialog.modal .acts { display: flex; gap: 8px; justify-content: flex-end; margin-
 }
 
 [hidden] { display: none !important; }
+
+/* the Launch Pass */
+.pass-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; padding-top: 12px; }
+.pass-body .k { font-size: 13px; font-weight: 600; color: var(--ink); margin: 8px 0 4px; }
+.pass-list { list-style: none; margin: 0 0 10px; padding: 0; }
+.pass-list li { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; font-size: 13px; color: var(--ink-2); }
+.pass-list li > .i { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--good-dot); }
+.pass .report-missing li > .i { color: var(--bad); }
+.pass-test { margin: 8px 0 0; color: var(--muted); }
+.pass-hint { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.pass-hint .i { width: 14px; height: 14px; }
+.pass-meter { padding-top: 10px; }
+.pass-meter .small { color: var(--muted); margin-bottom: 6px; }
+.pass-meter .bar { height: 6px; border-radius: 99px; background: var(--hover); overflow: hidden; }
+.pass-meter .fill { display: block; height: 100%; border-radius: inherit; background: var(--good-dot); transition: width var(--mid) var(--ease); }
+.pass-meter .bar.low .fill { background: var(--warn-dot); }
+.pass.on .row { padding-top: 10px; }
+@media (max-width: 820px) { .pass-body { grid-template-columns: minmax(0, 1fr); gap: 8px; } }
+.pass-meter .fill.w0 { width: 0%; }
+.pass-meter .fill.w5 { width: 5%; }
+.pass-meter .fill.w10 { width: 10%; }
+.pass-meter .fill.w15 { width: 15%; }
+.pass-meter .fill.w20 { width: 20%; }
+.pass-meter .fill.w25 { width: 25%; }
+.pass-meter .fill.w30 { width: 30%; }
+.pass-meter .fill.w35 { width: 35%; }
+.pass-meter .fill.w40 { width: 40%; }
+.pass-meter .fill.w45 { width: 45%; }
+.pass-meter .fill.w50 { width: 50%; }
+.pass-meter .fill.w55 { width: 55%; }
+.pass-meter .fill.w60 { width: 60%; }
+.pass-meter .fill.w65 { width: 65%; }
+.pass-meter .fill.w70 { width: 70%; }
+.pass-meter .fill.w75 { width: 75%; }
+.pass-meter .fill.w80 { width: 80%; }
+.pass-meter .fill.w85 { width: 85%; }
+.pass-meter .fill.w90 { width: 90%; }
+.pass-meter .fill.w95 { width: 95%; }
+.pass-meter .fill.w100 { width: 100%; }

@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 const MB = 1024 * 1024;
+const positive = (v, fallback) => (Number(v) > 0 ? Number(v) : fallback);
 
 export function loadConfig(env = process.env) {
   const port = Number(env.PORT || 8787);
@@ -74,5 +75,14 @@ export function loadConfig(env = process.env) {
     allowPrivateFetch: env.LIFTOFF_ALLOW_PRIVATE_FETCH === '1' && !production,
     proof: { url: proofProblem ? null : proofUrl, secret: proofProblem || !proofUrl ? null : proofSecret, problem: proofProblem },
     extraHosts: (env.LIFTOFF_EXTRA_HOSTS || '').split(',').map((h) => h.trim()).filter(Boolean),
+    // The Launch Pass, paid through Liftoff's own Stripe account. Off until the key is set.
+    billing: {
+      secretKey: env.LIFTOFF_STRIPE_SECRET_KEY || null,
+      webhookSecret: env.LIFTOFF_STRIPE_WEBHOOK_SECRET || null,
+      passUsd: positive(env.LIFTOFF_PASS_USD, 149),
+      claudeUsd: positive(env.LIFTOFF_PASS_CLAUDE_USD, 50),
+      freeLogins: (env.LIFTOFF_FREE_LOGINS || '').split(',').map((l) => l.trim().toLowerCase()).filter(Boolean),
+      api: 'https://api.stripe.com',
+    },
   };
 }
