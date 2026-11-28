@@ -57,39 +57,41 @@
   --noise-opacity: .05;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --bg: #0b0b0b;
-    --surface: rgba(255, 255, 255, .035);
-    --surface-solid: #151515;
-    --surface-2: rgba(255, 255, 255, .028);
-    --field: rgba(255, 255, 255, .04);
-    --btn: rgba(255, 255, 255, .055);
-    --btn-hover: rgba(255, 255, 255, .09);
-    --ink: #f2f2f0; --ink-2: #cfcfcc; --muted: #8e8e8a; --faint: #5c5c59;
-    --line: rgba(255, 255, 255, .085); --line-2: rgba(255, 255, 255, .055); --line-strong: rgba(255, 255, 255, .16);
-    --hover: rgba(255, 255, 255, .05);
-    --hi: rgba(255, 255, 255, .07);
+/* dark theme: theme.js sets data-theme from your choice, or from the device setting */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b0b0b;
+  --surface: rgba(255, 255, 255, .035);
+  --surface-solid: #151515;
+  --surface-2: rgba(255, 255, 255, .028);
+  --field: rgba(255, 255, 255, .04);
+  --btn: rgba(255, 255, 255, .055);
+  --btn-hover: rgba(255, 255, 255, .09);
+  --ink: #f2f2f0; --ink-2: #cfcfcc; --muted: #8e8e8a; --faint: #5c5c59;
+  --line: rgba(255, 255, 255, .085); --line-2: rgba(255, 255, 255, .055); --line-strong: rgba(255, 255, 255, .16);
+  --hover: rgba(255, 255, 255, .05);
+  --hi: rgba(255, 255, 255, .07);
 
-    --accent: #ededeb; --accent-soft: rgba(255, 255, 255, .08);
-    --primary: #ededeb; --primary-ink: #111111;
-    --good: #4fe0a6; --good-dot: #22c58b; --good-soft: rgba(34, 197, 139, .14);
-    --warn: #ffc65c; --warn-dot: #f5a524; --warn-soft: rgba(255, 190, 70, .12);
-    --bad: #ff7486; --bad-dot: #f43f5e; --bad-soft: rgba(255, 90, 110, .13);
-    --run: #82acff; --run-soft: rgba(110, 160, 255, .13);
+  --accent: #ededeb; --accent-soft: rgba(255, 255, 255, .08);
+  --primary: #ededeb; --primary-ink: #111111;
+  --good: #4fe0a6; --good-dot: #22c58b; --good-soft: rgba(34, 197, 139, .14);
+  --warn: #ffc65c; --warn-dot: #f5a524; --warn-soft: rgba(255, 190, 70, .12);
+  --bad: #ff7486; --bad-dot: #f43f5e; --bad-soft: rgba(255, 90, 110, .13);
+  --run: #82acff; --run-soft: rgba(110, 160, 255, .13);
 
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
-    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 14px 34px -18px rgba(0, 0, 0, .9);
-    --shadow-lg: 0 40px 90px -30px rgba(0, 0, 0, .95), 0 0 0 1px rgba(255, 255, 255, .06);
-    --glow: 0 10px 26px -12px rgba(0, 0, 0, .9);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 14px 34px -18px rgba(0, 0, 0, .9);
+  --shadow-lg: 0 40px 90px -30px rgba(0, 0, 0, .95), 0 0 0 1px rgba(255, 255, 255, .06);
+  --glow: 0 10px 26px -12px rgba(0, 0, 0, .9);
 
-    --aurora-1: rgba(255, 255, 255, .055);
-    --aurora-2: rgba(255, 255, 255, .03);
-    --aurora-3: rgba(255, 255, 255, .025);
-    --noise-opacity: .035;
-  }
+  --aurora-1: rgba(255, 255, 255, .055);
+  --aurora-2: rgba(255, 255, 255, .03);
+  --aurora-3: rgba(255, 255, 255, .025);
+  --noise-opacity: .035;
 }
+
+/* Switching light and dark cross-fades the page (theme.js, where the browser supports it). */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 380ms; animation-timing-function: cubic-bezier(.16, 1, .3, 1); }
 
 /* ---------- base ---------- */
 * { box-sizing: border-box; }
@@ -178,6 +180,9 @@ svg.i { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none;
 .topbar .crumb:hover { color: var(--ink); background: var(--hover); }
 .topbar .sep { color: var(--faint); }
 .topbar .sync { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--hover); }
+.topbar .theme-btn { width: 30px; height: 30px; margin-right: -6px; border-radius: 9px; }
+.theme-btn .i { transition: transform var(--slow) var(--spring); }
+.theme-btn:hover .i { transform: rotate(-18deg) scale(1.06); }
 .content { width: 100%; max-width: 1240px; margin: 0 auto; padding: 32px; display: flex; flex-direction: column; gap: 20px; }
 
 /* A view slides in once when you open it; polling updates patch in place and never replay this. */

@@ -5,7 +5,7 @@
 //   users/<uid>/apps/<slug>/state.json the same state the plugin keeps in .liftoff/state.json
 //   users/<uid>/apps/<slug>/source/    the imported code, scanned by verify and the pre-scan
 //   users/<uid>/apps/<slug>/runs/<id>.json  cloud runs with Claude
-//   sessions/<sid>.json                sign-in sessions
+//   sessions/<sid>.json                sign-in sessions (each names its user)
 //   github/<id>.json                   GitHub user id -> uid
 //
 // Writes are atomic (temp file + rename). Everything is read and written
@@ -116,6 +116,38 @@ export class Store {
 
   deleteSession(sid) {
     if (SID.test(String(sid))) fs.rmSync(path.join(this.dir, 'sessions', `${sid}.json`), { force: true });
+  }
+
+  // Signs one user out everywhere, except the session `keep`. Returns how many ended.
+  endSessions(uid, keep = null) {
+    const dir = path.join(this.dir, 'sessions');
+    let files = [];
+    try {
+      files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+    } catch {
+      return 0;
+    }
+    let ended = 0;
+    for (const f of files) {
+      const sid = f.slice(0, -5);
+      if (sid === keep || !SID.test(sid)) continue;
+      if (readJson(path.join(dir, f))?.uid !== uid) continue;
+      fs.rmSync(path.join(dir, f), { force: true });
+      ended++;
+    }
+    return ended;
+  }
+
+  // Deletes everything kept for one user: profile, keys, apps, imported code,
+  // run history and sign-ins.
+  deleteUser(uid) {
+    const user = this.getUser(uid);
+    fs.rmSync(this.userDir(uid), { recursive: true, force: true });
+    if (user?.githubId) {
+      const ref = path.join(this.dir, 'github', `${Number(user.githubId)}.json`);
+      if (readJson(ref)?.uid === uid) fs.rmSync(ref, { force: true });
+    }
+    this.endSessions(uid);
   }
 
   // ---------- apps ----------
