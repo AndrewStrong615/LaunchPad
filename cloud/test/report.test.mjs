@@ -29,8 +29,17 @@ test('the checks a certificate needs', () => {
   assert.deepEqual(requiredChecks(app(), { stripeConnected: true }), BASE, 'Stripe is connected, but this app takes no payments');
   assert.deepEqual(requiredChecks(app({ payments: ['stripe'], profile: { set: { payments: false } } })), BASE, 'the owner says it takes no payments');
   assert.deepEqual(requiredChecks(app({ integrations: { supabase: true }, profile: { set: { database: false } } })), BASE, 'no server data, so no RLS check');
-  assert.deepEqual(requiredChecks(app({ steps: { payments: { provider: 'Paddle' } } })), BASE);
+  // Paddle and Polar sandboxes prove the webhook and purchase too; Lemon Squeezy the webhook.
+  assert.deepEqual(requiredChecks(app({ steps: { payments: { provider: 'Paddle' } } })), [...BASE, 'pay-webhook', 'pay-e2e']);
+  assert.deepEqual(requiredChecks(app({ payments: ['polar'], integrations: { polar: true } })), [...BASE, 'pay-webhook', 'pay-e2e']);
+  assert.deepEqual(requiredChecks(app({ steps: { payments: { provider: 'Lemon Squeezy' } } })), [...BASE, 'pay-webhook']);
+  assert.deepEqual(requiredChecks(app({ steps: { payments: { provider: 'Paddle' } }, profile: { set: { payments: false } } })), BASE, 'Paddle, but the owner says it takes no payments');
+  // A service Liftoff can't check adds nothing to prove.
+  assert.deepEqual(requiredChecks(app({ steps: { payments: { provider: 'Creem' } } })), BASE);
+  assert.deepEqual(requiredChecks(app({ steps: { payments: { provider: 'Creem' } } }), { uses: { payments: 'custom-creem' } }), BASE);
   assert.deepEqual(requiredChecks(app({ integrations: { supabase: true } })), [...BASE, 'sec-rls']);
+  assert.deepEqual(requiredChecks(app({ integrations: { firebase: true } })), [...BASE, 'sec-rls']);
+  assert.deepEqual(requiredChecks(app({ integrations: { neon: true } })), BASE);
 });
 
 test('certified only when every required check was proven by Liftoff in the last 30 days', () => {

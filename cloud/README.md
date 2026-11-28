@@ -42,7 +42,9 @@ Runs use [Claude Managed Agents](https://platform.claude.com/docs/en/managed-age
 - **Model**: runs use Claude Sonnet 5.5 by default (shown as *Cruise*), which handles this setup and coding work well for about half the cost of Opus (*Boost*). Each person can make Boost their own default in Account settings and can pick either mode when they start a run. A finished or failed run offers "Try again with Boost" for the same steps. Both run at high effort. The choices are `MODELS` in `lib/agent.mjs`.
 - **Code**: GitHub apps are mounted as a repository with the user's GitHub token, which also lets Claude push its branch. Zips are uploaded as a file.
 - **Keys**: each person's connected accounts are copied into their own Anthropic vault as credentials limited to that service's API host (for example `STRIPE_SECRET_KEY` only for `api.stripe.com`). The sandbox sees placeholders; the real key is swapped in only on the way to that host. Signing keys (App Store Connect, Google Play) never enter the sandbox: Claude asks to copy them into GitHub Actions secrets, the server does it directly, and only after the user approves it in the browser.
-- **Network**: the sandbox can reach package registries, GitHub and the connected services' APIs, nothing else. Web search and fetch are off.
+- **Checking keys**: connecting a key asks that service whether it works, with one read-only request (Stripe's balance, Vercel's user, …). A key the service turns down (401) is never saved; a key that works but lacks a permission is kept with a note, and so is one Liftoff couldn't check because the service didn't answer. Payments and sign-in keys also say whether they're test, sandbox or live keys, which the Accounts page and the assistant see. `LIFTOFF_CHECK_KEYS=0` turns the check off (the tests do).
+- **Services Liftoff doesn't list**: on the Accounts page, "Add a service" takes a name, what it's for, a link to its API docs, the address its API answers on and the key, plus how the key is sent (bearer, its own header, Basic auth or a query parameter). These keys never go in the vault or the sandbox. The assistant reads the docs with `liftoff_docs` (that docs site only) and calls the API with `liftoff_call`: this server adds the key, sends the request only to the addresses the user gave, follows no redirects, hides the key in the reply, and waits for the user's yes before a DELETE. `github_set_secret` can copy these keys to CI too. Verify can't check them, so the items they cover show as reported, never as proven, and a launch report doesn't require them.
+- **Network**: the sandbox can reach package registries, GitHub and the built-in services' APIs, nothing else. Web search and fetch are off.
 - **Liftoff tools**: Claude reads the plan, skills and templates and records steps, tasks, checks, deploys and settings through tools this server carries out (`liftoff_plan`, `liftoff_step`, `liftoff_verify`, …), so the Flight Board updates as it works and checks that need real keys run here. Checklist items the server can prove can only be ticked by `verify`. That includes the purchase flow test for web apps on Stripe: the sandbox can't open Stripe Checkout, so Claude calls `liftoff_prove_purchase` and Liftoff's own browser runs it, or the test runs in the app's CI and `verify` finds it. Either way Stripe's records decide (a paid test Checkout on the app, then a cancellation, with the app's webhook accepting both).
 - **Asking first**: Claude asks (`ask_user`) before anything that spends money, changes DNS, goes live, submits to a store or deletes something. Commands the sandbox's safety check is unsure about wait for an Allow or Decline.
 - **Budget**: every run has a spending cap (`LIFTOFF_RUN_BUDGET_USD`, default $15, shown as 1,500 tokens). A run that reaches it pauses, and the user can add 1,000 tokens ($10) and continue. The run page shows what each run used, in tokens.
@@ -141,6 +143,7 @@ The blueprint uses the Starter instance because Render disks need a paid instanc
 | `LIFTOFF_AGENT_ID`, `LIFTOFF_ENVIRONMENT_ID` | Use an agent and environment you manage yourself instead of the ones the server creates. |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | GitHub sign-in (scopes `repo read:user`, to import private repos, push branches and open pull requests). |
 | `LIFTOFF_DEV_LOGIN=1` | One-click local sign-in. Ignored when `NODE_ENV=production`. |
+| `LIFTOFF_CHECK_KEYS=0` | Don't ask services whether a key works when it's connected (on by default). |
 | `LIFTOFF_RUN_BUDGET_USD` | Spending cap per run, in dollars of model spend (default 15). |
 | `LIFTOFF_RUN_MODEL` | The mode runs use when the person doesn't pick one: `cruise` (default) or `boost` (a model id like `claude-opus-5-5` works too). |
 | `LIFTOFF_ASSISTANT_NAME` | What people call the assistant (default `Pilot`). Letters, digits, spaces and `.'-`, up to 24 characters. |
@@ -180,6 +183,8 @@ cloud/
     provision.mjs     creates/updates the agent and environment
     importer.mjs      GitHub and zip import, scans
     accounts.mjs      per-user accounts and the Anthropic vault
+    key-check.mjs     asks each service whether a key works when it's connected
+    custom.mjs        services the user adds themselves: their keys, docs and API calls
     archive.mjs       safe tar.gz/zip unpacking and zipping
     github.mjs        OAuth, repos, tarballs, pull requests, Actions secrets
     safe-fetch.mjs    fetch that refuses private addresses (verify, Pulse)

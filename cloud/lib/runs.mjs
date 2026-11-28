@@ -13,6 +13,7 @@ import { sandboxEnvPlan, syncVault } from './accounts.mjs';
 import { githubToken } from './importer.mjs';
 import { zipDirectory } from './archive.mjs';
 import { describeTool, NEEDS_APPROVAL, runTool } from './tools.mjs';
+import { listCustomServices } from './custom.mjs';
 import { randomId } from './crypto.mjs';
 import { HttpError } from './http.mjs';
 
@@ -205,7 +206,7 @@ export class RunManager {
       run.uploadFileId = file.id;
       resources.push({ type: 'file', file_id: file.id, mount_path: '/app.zip' });
     }
-    const text = kickoff({ state, steps: run.steps, mode: run.mode, branch: run.branch, envPlan: sandboxEnvPlan(store, run.uid), note: run.note });
+    const text = kickoff({ state, steps: run.steps, mode: run.mode, branch: run.branch, envPlan: sandboxEnvPlan(store, run.uid), note: run.note, custom: listCustomServices(store, run.uid) });
     const session = await client.beta.sessions.create({
       // The agent's prompt and tools, on the model picked for this run.
       agent: { type: 'agent_with_overrides', id: config.anthropic.agentId, model: { id: run.model || DEFAULT_MODEL, effort: EFFORT } },
@@ -475,8 +476,10 @@ export class RunManager {
       run.status = 'needs-you';
       return;
     }
-    if (NEEDS_APPROVAL[ev.name]) {
-      const text = NEEDS_APPROVAL[ev.name](this.ctx, run, ev.input || {});
+    // A tool that waits on the user (github_set_secret, or a DELETE to one of
+    // the user's own services): its describer returns what to ask, or null.
+    const text = NEEDS_APPROVAL[ev.name]?.(this.ctx, run, ev.input || {});
+    if (text) {
       this.push(run, { id: ev.id, at, kind: 'liftoff', tool: ev.name, text: describeTool(ev.name, ev.input) });
       if (!run.pending.some((p) => p.id === ev.id)) run.pending.push({ id: ev.id, kind: 'secret', tool: ev.name, input: ev.input, text, at });
       run.status = 'needs-you';

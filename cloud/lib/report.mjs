@@ -10,11 +10,11 @@
 // test needs.
 import fs from 'node:fs';
 import path from 'node:path';
-import { checklistFor } from '../../lib/catalog.mjs';
-import { FEATURES, describe, featuresOf, profileView } from '../../lib/profile.mjs';
-import { sellsWithStripe, VERIFIABLE } from '../../lib/verify.mjs';
+import { checklistFor, usesOf } from '../../lib/catalog.mjs';
+import { FEATURES, describe, featuresOf, knownFeatures, profileView } from '../../lib/profile.mjs';
+import { canProve, sellsWithStripe } from '../../lib/verify.mjs';
 import { STEPS } from '../../proof/protocol.mjs';
-import { stripeConnected as hasStripe } from './accounts.mjs';
+import { stripeConnected as hasStripe, usesFor } from './accounts.mjs';
 import { DEFAULT_ASSISTANT } from './brand.mjs';
 import { HttpError } from './http.mjs';
 import { verifyApp } from './tools.mjs';
@@ -27,14 +27,20 @@ const SHOT = /^\d{2}-[a-z-]{1,20}\.jpg$/;
 const LABEL = Object.fromEntries(STEPS);
 
 // What must be proven for a certificate: the site is up on HTTPS with its
-// legal pages, ships no secret keys, and (when it sells through Stripe) the
-// webhook and the whole purchase flow work. Supabase apps also need RLS on.
-// Only checks that fit what the app does count (lib/profile.mjs): an app
-// that takes no payments is certified without a purchase test.
-export function requiredChecks(state, { stripeConnected = false } = {}) {
+// legal pages, ships no secret keys, and (when it sells through Stripe,
+// Paddle or Polar) the webhook and the whole purchase flow work; Lemon
+// Squeezy's webhook too. Supabase and Firebase apps also need their data
+// locked down. A service Liftoff can't check (the user's own) adds nothing:
+// its items show as reported, never as proven. Only checks that fit what the
+// app does count (lib/profile.mjs): an app that takes no payments is
+// certified without a purchase test.
+export function requiredChecks(state, { stripeConnected = false, uses = usesOf(state) } = {}) {
   const ids = ['host-deploy', 'host-https', 'land-legal', 'sec-keys'];
-  if (sellsWithStripe(state, { stripeConnected })) ids.push('pay-webhook', 'pay-e2e');
-  if (state.integrations?.supabase) ids.push('sec-rls');
+  const sells = (state.platforms || []).includes('web') && knownFeatures(state).payments;
+  if (sellsWithStripe(state, { stripeConnected, uses })) ids.push('pay-webhook', 'pay-e2e');
+  else if (sells && (uses.payments === 'paddle' || uses.payments === 'polar')) ids.push('pay-webhook', 'pay-e2e');
+  else if (sells && uses.payments === 'lemonsqueezy') ids.push('pay-webhook');
+  if (uses.database === 'supabase' || uses.database === 'firebase') ids.push('sec-rls');
   const fit = new Set(checklistFor(state.platforms || [], featuresOf(state)).map((c) => c.id));
   return ids.filter((id) => fit.has(id));
 }
@@ -62,19 +68,19 @@ export const unnamedInPublic = (c) => SENSITIVE.has(c.id) && c.status !== 'prove
 const day = (iso) => (iso ? new Date(iso).toISOString().slice(0, 10) : null);
 const FEATURE = Object.fromEntries(FEATURES.map((f) => [f.id, f]));
 
-function statusOf(item, now) {
+function statusOf(item, now, provable) {
   if (item.verify?.ok === false) return 'failed';
   if (item.done && item.by === 'verified') return item.at && now - Date.parse(item.at) <= PROOF_MAX_AGE_DAYS * DAY ? 'proven' : 'stale';
   if (item.done) return 'reported';
-  return VERIFIABLE.includes(item.id) ? 'unproven' : 'open';
+  return provable ? 'unproven' : 'open';
 }
 
 // The report for an app as it stands. Pure: the caller runs verify first.
-export function assess(state, { now = Date.now(), stripeConnected = false } = {}) {
-  const required = new Set(requiredChecks(state, { stripeConnected }));
+export function assess(state, { now = Date.now(), stripeConnected = false, uses = usesOf(state) } = {}) {
+  const required = new Set(requiredChecks(state, { stripeConnected, uses }));
   const checks = checklistFor(state.platforms || [], featuresOf(state)).map((c) => {
     const cur = state.checklist?.[c.id] || { done: false };
-    const status = statusOf({ id: c.id, ...cur }, now);
+    const status = statusOf({ id: c.id, ...cur }, now, canProve(state, c.id, { uses, stripeConnected }));
     const ticked = status === 'proven' || status === 'stale' || status === 'reported';
     return {
       id: c.id,
@@ -113,7 +119,7 @@ const reportsDir = (ctx, uid, slug) => path.join(ctx.store.appDir(uid, slug), 'r
 export async function createReport(ctx, uid, slug) {
   const { state } = await verifyApp(ctx, uid, slug);
   const now = Date.now();
-  const a = assess(state, { now, stripeConnected: hasStripe(ctx.store, uid) });
+  const a = assess(state, { now, stripeConnected: hasStripe(ctx.store, uid), uses: usesFor(ctx.store, uid, state) });
   const id = ctx.store.newPublicId('rp');
   const dir = path.join(reportsDir(ctx, uid, slug), id);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -234,7 +240,7 @@ export function countClick(ctx, uid, slug) {
 
 // What the Flight Board shows.
 export function reportView(ctx, uid, state) {
-  const a = assess(state, { stripeConnected: hasStripe(ctx.store, uid) });
+  const a = assess(state, { stripeConnected: hasStripe(ctx.store, uid), uses: usesFor(ctx.store, uid, state) });
   const base = ctx.config.publicUrl;
   const badgeId = state.report?.badgeId || null;
   const history = (state.report?.history || []).map((r) => ({ ...r, url: `${base}/r/${r.id}` }));
