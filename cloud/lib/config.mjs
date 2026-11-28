@@ -74,6 +74,8 @@ export function loadConfig(env = process.env) {
     // Only for tests and local development: lets verify and Pulse reach private addresses.
     allowPrivateFetch: env.LIFTOFF_ALLOW_PRIVATE_FETCH === '1' && !production,
     proof: { url: proofProblem ? null : proofUrl, secret: proofProblem || !proofUrl ? null : proofSecret, problem: proofProblem },
+    // GitHub logins that can read the run records (lib/records.mjs).
+    adminLogins: (env.LIFTOFF_ADMIN_LOGINS || '').split(',').map((l) => l.trim().toLowerCase()).filter(Boolean),
     extraHosts: (env.LIFTOFF_EXTRA_HOSTS || '').split(',').map((h) => h.trim()).filter(Boolean),
     // The Launch Pass, paid through Liftoff's own Stripe account. Off until the key is set.
     billing: {

@@ -396,7 +396,7 @@
       h('li', {}, n === 1 ? 'Your app, with its imported code and run history' : n ? `Your ${n} apps, with their imported code and run history` : 'Your apps, imported code and run history'),
       h('li', {}, 'The keys you saved for Stripe, hosting and other services, here and in Claude’s vault'),
       h('li', {}, C.me.github.signedIn ? 'Your GitHub sign-in, and the access you gave Liftoff Cloud' : 'Your settings and sign-ins')),
-    h('p', { class: 'small' }, 'Your repositories, pull requests and the services Claude set up stay as they are.'),
+    h('p', { class: 'small' }, 'Your repositories, pull requests and the services Claude set up stay as they are. So do the anonymous run records Liftoff learns from, which hold your app’s stack and how each step went, but no names, code or keys.'),
     h('label', { class: 'field' }, h('span', {}, 'Type ', h('b', { class: 'mono' }, login), ' to confirm'),
       h('input', { name: 'confirm', type: 'text', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off', 'aria-label': `Type ${login} to confirm`,
         oninput: (e) => { e.currentTarget.form.querySelector('.btn.danger-solid').disabled = e.currentTarget.value.trim().toLowerCase() !== login.toLowerCase(); } })),
@@ -425,7 +425,123 @@
       h('h1', {}, 'Account settings'),
       h('p', {}, 'Your profile, how Liftoff Cloud looks, and what Claude runs start with.')));
     if (!C.me) return [head, h('div', { class: 'card narrow empty' }, h('p', {}, 'Loading your settings…'))];
-    return [head, profileCard(C.me), appearanceCard(), runsCard(C.me), connectionsCard(C.me), sessionsCard(), dangerCard()];
+    return [head, profileCard(C.me), appearanceCard(), runsCard(C.me), C.me.admin ? recordsCard() : null, connectionsCard(C.me), sessionsCard(), dangerCard()];
+  }
+
+  // ---------- run records (admins only) ----------
+
+  async function loadRecords(force = false) {
+    if (!C.me?.admin) return;
+    if (!force && C.recordsAt && Date.now() - C.recordsAt < 30000) return;
+    C.recordsAt = Date.now();
+    try {
+      C.records = await api('/api/records');
+      C.recordsError = null;
+    } catch (e) {
+      C.recordsError = e.message;
+    }
+  }
+
+  const openRecords = () => {
+    go('records');
+    loadRecords(true).then(repaint);
+  };
+
+  function recordsCard() {
+    return h('section', { class: 'card narrow' },
+      h('div', { class: 'card-head' }, h('h2', {}, 'Run records'), h('span', { class: 'end pill sm' }, 'Admin')),
+      h('div', { class: 'card-body' },
+        h('div', { class: 'line' },
+          h('div', { class: 'grow' }, h('div', { class: 'small' }, 'How every Claude run on this server went: success rates by stack and step, and what a step really costs. No names, code or keys.')),
+          h('button', { class: 'btn', type: 'button', onclick: openRecords }, 'Open', icon('arrow')))));
+  }
+
+  const OUTCOME_WORD = { ...RUN_WORD, running: 'Still going' };
+  const rate = (n, of) => (of ? `${Math.round((n / of) * 100)}%` : '–');
+
+  function statTile(label, value, hint) {
+    return h('div', { class: 'stat spot' }, h('div', { class: 'label' }, label), h('div', { class: 'value' }, value), h('div', { class: 'hint' }, hint));
+  }
+
+  // cols: [{ label, cell(row), num }]
+  function recTable(label, cols, rows) {
+    return h('div', { class: 'table-scroll', role: 'region', 'aria-label': label, tabindex: '0' },
+      h('table', { class: 'rec-table' },
+        h('thead', {}, h('tr', {}, cols.map((c) => h('th', { scope: 'col', class: c.num ? 'num' : '' }, c.label)))),
+        h('tbody', {}, rows.map((r) => h('tr', {}, cols.map((c) => h('td', { class: c.num ? 'num' : '' }, c.cell(r))))))));
+  }
+
+  function recCard(title, count, body, sub) {
+    return h('section', { class: 'card' },
+      h('div', { class: 'card-head' }, h('h2', {}, title), count != null ? h('span', { class: 'count' }, count) : null, sub ? h('span', { class: 'end sub' }, sub) : null),
+      h('div', { class: 'card-body' }, body));
+  }
+
+  function recordsView() {
+    const r = C.records;
+    const head = h('div', { class: 'page-head' },
+      h('div', {},
+        h('h1', {}, 'Run records'),
+        h('p', {}, 'Every Claude run on this server: the stack, how each step ended, the checklist before and after, and the cost. No names, code or keys are kept. Only admins see this page.')),
+      r?.total ? h('div', { class: 'actions' }, h('a', { class: 'btn', href: '/api/records/export', download: '' }, icon('download'), 'Download all')) : null);
+    if (!C.me) return [head, h('div', { class: 'card empty' }, h('p', {}, 'Loading…'))];
+    if (!C.me.admin) return [head, h('div', { class: 'card empty' }, h('p', {}, 'Run records are only for the admins of this server.'))];
+    if (C.recordsError && !r) return [head, h('div', { class: 'note-box bad' }, icon('x'), h('span', {}, C.recordsError))];
+    if (!r) return [head, h('div', { class: 'card empty' }, h('p', {}, 'Loading the records…'))];
+    if (!r.total) return [head, h('div', { class: 'card empty' }, h('p', {}, 'No runs recorded yet. Each Claude run adds one when it starts, and fills it in when it stops.'))];
+
+    const stats = h('section', { class: 'stats', 'aria-label': 'Totals' },
+      statTile('Runs', String(r.total), `${Board.plural(r.apps, 'app')} since ${new Date(r.since).toLocaleDateString([], { month: 'short', day: 'numeric' })}`),
+      statTile('Finished', rate(r.finished, r.ended), `${r.finished} of ${Board.plural(r.ended, 'run')} that stopped`),
+      statTile('Cost per run', usd(r.avgCost), `${usd(r.cost)} in all`),
+      statTile('Cost per step done', usd(r.costPerStep), Board.plural(r.stepsDone, 'step') + ' done'));
+
+    const byStack = recCard('By stack', r.byStack.length, recTable('Runs by stack', [
+      { label: 'Stack', cell: (x) => h('b', {}, x.label) },
+      { label: 'Apps', num: true, cell: (x) => x.apps },
+      { label: 'Runs', num: true, cell: (x) => x.runs },
+      { label: 'Finished', num: true, cell: (x) => rate(x.finished, x.ended) },
+      { label: 'Failed', num: true, cell: (x) => x.failed || '–' },
+      { label: 'Per run', num: true, cell: (x) => usd(x.avgCost) },
+      { label: 'Per step', num: true, cell: (x) => usd(x.costPerStep) },
+      { label: 'Fails most', cell: (x) => (x.topFailure ? h('span', { class: 'small' }, `${x.topFailure.title} (${x.topFailure.n})`) : '–') },
+    ], r.byStack));
+
+    const bySteps = recCard('By step', r.bySteps.length, recTable('Runs by step', [
+      { label: 'Step', cell: (x) => h('b', {}, x.label) },
+      { label: 'Tried', num: true, cell: (x) => x.tried },
+      { label: 'Done', num: true, cell: (x) => x.done },
+      { label: 'Blocked', num: true, cell: (x) => x.blocked || '–' },
+      { label: 'Success', num: true, cell: (x) => (x.rate == null ? '–' : h('span', { class: 'pill sm ' + (x.rate >= 80 ? 'good' : x.rate >= 50 ? 'warn' : 'bad') }, `${x.rate}%`)) },
+      { label: 'Usually with', cell: (x) => (x.providers.length ? x.providers.map((p) => p.provider).join(', ') : '–') },
+      { label: 'Why it got stuck', cell: (x) => (x.why.length ? h('span', { class: 'small' }, x.why[0].text) : '–') },
+    ], r.bySteps), 'A step is tried when a run works on it and it wasn’t done yet');
+
+    const byModel = recCard('By model', null, recTable('Runs by model', [
+      { label: 'Model', cell: (x) => h('b', {}, x.label) },
+      { label: 'Runs', num: true, cell: (x) => x.runs },
+      { label: 'Finished', num: true, cell: (x) => rate(x.finished, x.ended) },
+      { label: 'Per run', num: true, cell: (x) => usd(x.avgCost) },
+      { label: 'Per step', num: true, cell: (x) => usd(x.costPerStep) },
+    ], r.byModel));
+
+    const failures = recCard('Checks still failing after a run', r.failures.length, r.failures.length
+      ? h('div', { class: 'rows' }, r.failures.map((f) => h('div', { class: 'line' },
+        h('div', { class: 'grow' }, h('div', { class: 'name' }, f.title), f.example ? h('div', { class: 'small' }, f.example) : null),
+        h('span', { class: 'count' }, f.n))))
+      : h('p', { class: 'small' }, 'None so far.'));
+
+    const errors = recCard('Errors runs hit most', r.errors.length, r.errors.length
+      ? h('div', { class: 'rows' }, r.errors.map((e) => h('div', { class: 'line' }, h('div', { class: 'grow small mono' }, e.text), h('span', { class: 'count' }, e.n))))
+      : h('p', { class: 'small' }, 'None so far.'));
+
+    const recent = recCard('Latest runs', null, h('div', { class: 'rows' }, r.recent.map((x) => h('div', { class: 'line' },
+      h('div', { class: 'grow' },
+        h('div', { class: 'name' }, x.steps.length ? x.steps.map((st) => st.label).join(', ') : 'No step changed'),
+        h('div', { class: 'small' }, [x.stack, x.model, ago(x.at), usd(x.cost), x.minutes != null ? (x.minutes < 1 ? 'under a minute' : `${Math.round(x.minutes)} min`) : null, x.errors ? Board.plural(x.errors, 'error') : null].filter(Boolean).join(' · '))),
+      h('span', { class: 'pill sm ' + (RUN_TONE[x.outcome] || '') }, OUTCOME_WORD[x.outcome] || x.outcome)))));
+
+    return [head, stats, byStack, bySteps, h('div', { class: 'rec-grid' }, failures, errors), byModel, recent];
   }
 
   // ---------- one app ----------
@@ -1145,12 +1261,14 @@
         }
       });
       const run = state.view === 'run' ? loadRun(false) : null;
-      await Promise.all([me, run]);
+      const records = state.view === 'records' ? me.then(() => loadRecords()) : null;
+      await Promise.all([me, run, records]);
       return true;
     },
     views: {
       add: { title: 'Add an app', render: addView },
       settings: { title: 'Account settings', render: settingsView },
+      records: { title: 'Run records', render: recordsView },
       run: { get title() { const a = appOf(C.slug); return a ? `${a.name} · Claude run` : 'Claude run'; }, render: runView, key: () => `${C.slug}:${C.loading ? 'loading' : C.run?.id || 'new'}` },
     },
     navExtra: () => h('button', { class: 'nav' + (state.view === 'add' ? ' on' : ''), onclick: () => go('add') }, icon('plus'), h('span', {}, 'Add an app')),

@@ -221,6 +221,7 @@ export function createApp(ctx) {
         models: meModels(uid),
         limits: { uploadMb: Math.round(config.maxUploadBytes / 1048576), runBudgetUsd: config.runBudgetUsd, maxRuns: config.maxRunsPerUser },
         settings: CONFIG_KEYS,
+        admin: ctx.records.isAdmin(user),
       });
     }
 
@@ -251,6 +252,22 @@ export function createApp(ctx) {
       if (runs.hasOpenRuns(uid)) throw new HttpError(409, 'Stop your Claude runs first, then delete your account.');
       const done = await deleteAccount(uid);
       return send(res, 200, { deleted: true, ...done }, 'application/json; charset=utf-8', { 'set-cookie': cookie(SID_COOKIE, '', { maxAge: 0, secure }) });
+    }
+
+    // ----- Run records (lib/records.mjs): only for the logins in LIFTOFF_ADMIN_LOGINS -----
+    if (parts[0] === 'records' && M === 'GET' && ctx.records.isAdmin(user)) {
+      limit(`records:${uid}`, 60, 60000);
+      if (parts.length === 1) return ok(ctx.records.summary());
+      if (parts[1] === 'export' && parts.length === 2) {
+        const body = ctx.records.all().map((r) => `${JSON.stringify(r)}\n`).join('');
+        res.writeHead(200, {
+          'content-type': 'application/x-ndjson; charset=utf-8',
+          'content-disposition': `attachment; filename="liftoff-run-records-${new Date().toISOString().slice(0, 10)}.jsonl"`,
+          'cache-control': 'no-store',
+          'x-content-type-options': 'nosniff',
+        });
+        return res.end(body);
+      }
     }
 
     if (parts[0] === 'accounts') {

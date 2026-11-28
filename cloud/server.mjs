@@ -13,6 +13,7 @@ import { createSafeFetch } from './lib/safe-fetch.mjs';
 import { RunManager } from './lib/runs.mjs';
 import { ProofRunner } from './lib/proof.mjs';
 import { Billing } from './lib/billing.mjs';
+import { Records } from './lib/records.mjs';
 import { createApp } from './lib/app.mjs';
 import { provision } from './lib/provision.mjs';
 
@@ -34,6 +35,7 @@ export async function buildContext(config, { anthropic, fetch, safeFetch, proof 
     safeFetch: safeFetch || createSafeFetch({ allowPrivate: config.allowPrivateFetch }),
     anthropic: client || null,
   };
+  ctx.records = new Records(ctx);
   ctx.runs = new RunManager(ctx);
   ctx.proof = new ProofRunner(ctx, proof);
   ctx.billing = new Billing(ctx, fetch || globalThis.fetch);

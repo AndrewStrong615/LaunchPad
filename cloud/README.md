@@ -15,11 +15,12 @@ It lives next to the plugin and reuses it: the same detection, launch steps, rea
 - **Add an app** from a GitHub link (public, or private once you sign in with GitHub), from a list of your repos, or by uploading a zip. The code is unpacked safely (no `../` paths, no links, size and file limits), read with the plugin's detection, and scanned: App Store pre-scan and leaked keys.
 - **The Flight Board** for every app: launch steps, your tasks, release readiness, deploys, Pulse and "do this next", plus where the code came from, what the scan found, and per-app settings.
 - **Accounts**: each person adds a key once and all their apps use it. Keys are encrypted at rest (AES-256-GCM) and never sent back to the browser.
-- **Account settings** (your picture in the sidebar): profile from GitHub, Light, Dark or Match device (saved to the account and in the browser, so the page never flashes the wrong theme; the sun and moon button in the top bar switches it too), the model your runs start on, connections, signing out here or on every other device, and deleting the account. Deleting removes the apps, imported code, run history and keys, deletes the person's Anthropic vault, and takes back Liftoff Cloud's GitHub access. It waits until no run is going.
+- **Account settings** (your picture in the sidebar): profile from GitHub, Light, Dark or Match device (saved to the account and in the browser, so the page never flashes the wrong theme; the sun and moon button in the top bar switches it too), the model your runs start on, connections, signing out here or on every other device, and deleting the account. Deleting removes the apps, imported code, run history and keys, deletes the person's Anthropic vault, and takes back Liftoff Cloud's GitHub access. It waits until no run is going. The anonymous run records stay (the dialog says so).
 - **Verify and Pulse** run on the server against the live site and the connected services, through a fetch that refuses private and internal addresses.
 - **Liftoff runs the purchase test itself** for web apps on Stripe: its own browser signs up on the app's test-mode preview, buys Pro with Stripe's test card, checks Pro unlocks, cancels, and checks Pro locks again, with a screenshot of each step. Stripe's records for that checkout decide the result (see [The purchase test](#the-purchase-test)).
 - **Launch reports and the "Launch certified" badge**: a dated page anyone with the link can open, with every check, the evidence and a score, and a badge for the app's own site that links to it. It says "Launch certified" only when every required check ran on Liftoff's server and passed (see [Launch reports](#launch-reports-and-the-badge)).
 - **The Launch Pass**: one payment per app, through Liftoff's own Stripe account, opens cloud runs (with Claude time included), the purchase test and launch reports. Importing, the scan, verify, Pulse and the launch score stay free. Off until a Stripe key is set (see [The Launch Pass](#the-launch-pass)).
+- **Run records**: every cloud run leaves an anonymous record of the stack, how each step ended, the checklist before and after, the cost and the errors, so Liftoff can learn what works for which stack. Admins see success rates by stack, step and model, and what a step really costs (see [Run records](#run-records)).
 - **Cloud runs with Claude.** Pick steps (or all that are left), pick a model, add a note, start. Claude works in its own sandbox with a copy of the code and follows the plugin's skills. The run page shows what it's doing live; questions and approval requests appear as cards. GitHub apps get a branch and a draft pull request. Zips get a patch and an updated zip to download.
 
 ## How a run works
@@ -33,7 +34,7 @@ Runs use [Claude Managed Agents](https://platform.claude.com/docs/en/managed-age
 - **Liftoff tools**: Claude reads the plan, skills and templates and records steps, tasks, checks, deploys and settings through tools this server carries out (`liftoff_plan`, `liftoff_step`, `liftoff_verify`, …), so the Flight Board updates as it works and checks that need real keys run here. Checklist items the server can prove can only be ticked by `verify`. That includes the purchase flow test for web apps on Stripe: the sandbox can't open Stripe Checkout, so Claude calls `liftoff_prove_purchase` and Liftoff's own browser runs it, or the test runs in the app's CI and `verify` finds it. Either way Stripe's records decide (a paid test Checkout on the app, then a cancellation, with the app's webhook accepting both).
 - **Asking first**: Claude asks (`ask_user`) before anything that spends money, changes DNS, goes live, submits to a store or deletes something. Commands the sandbox's safety check is unsure about wait for an Allow or Decline.
 - **Budget**: every run has a spending cap (`LIFTOFF_RUN_BUDGET_USD`, default $15). A run that reaches it pauses, and the user can add $10 and continue. The run page shows what each run cost.
-- **What runs cost** (rough, before real usage data): on Sonnet 5.5, about $0.50 to $2.50 for one step and $10 to $30 for a full launch; Opus 5.5 costs about twice that. Scans, the Flight Board, verify and Pulse don't use Claude.
+- **What runs cost** (rough, before real usage data): on Sonnet 5.5, about $0.50 to $2.50 for one step and $10 to $30 for a full launch; Opus 5.5 costs about twice that. Scans, the Flight Board, verify and Pulse don't use Claude. Once runs happen, the [run records](#run-records) page shows the real cost per run and per step.
 - **Restarts**: run state is saved after every event. After a restart the server picks each run up where it left off, handling each event once.
 
 The agent's prompt and tools are in `lib/agent.mjs`. The server creates the agent and its environment on first start and updates them when that file changes (ids are kept in `<data>/agent.json`).
@@ -79,6 +80,17 @@ Liftoff Cloud charges once per app for the parts that cost money to run or that 
 
 To turn it on: in Stripe (test mode first), copy the secret key into `LIFTOFF_STRIPE_SECRET_KEY`; add a webhook endpoint at `https://<service>/billing/stripe-webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded` and copy its signing secret into `LIFTOFF_STRIPE_WEBHOOK_SECRET`. In test mode the card says so and Checkout takes the 4242 card. A refund in Stripe doesn't take the pass back yet.
 
+## Run records
+
+Every cloud run leaves a record in `<data>/records/runs/<run id>.json`. It's written when the run starts and brought up to date each time the run stops working (finished, stopped, failed or paused at its budget, again if it's picked up later). This is what Phase 3 of the roadmap learns from: which stacks and steps go well, why steps get stuck, and what a launch really costs.
+
+- **In a record**: the stack the scan detected (framework, platforms, sign-in, payments, package manager, integrations, GitHub or zip), which accounts were connected (ids only), the model, the steps asked for, each step's status before and after with the provider used and, if it got blocked, why; every checklist item before and after (proven, failed, ticked or open) and which checks still fail with the reason; the cost, budget and minutes; whether a pull request was opened; the errors the run hit; and counts of tool calls, questions and approvals.
+- **Not in a record**: the person, the app's name, the repo, code, keys, the note, the chat or Claude's messages. The app is a keyed hash (`a_…`), so one app's runs group together but can't be traced back once the account is gone. Error texts and blocked reasons have links, hosts, IP addresses, emails, key-like strings and the app's own names (app, repo, owner, login) taken out, and are cut to 240 characters.
+- **Deleting** an app or an account leaves its records.
+- **Reading them**: GitHub logins in `LIFTOFF_ADMIN_LOGINS` get a *Run records* card in Account settings. It opens a page with runs, the share that finished, cost per run and per step done, then tables by stack, by step (tried, done, blocked, success rate, the usual provider, why it got stuck) and by model, the checks that fail most after a run, the errors runs hit most, and the latest runs. *Download all* gives every record as JSON lines (`GET /api/records/export`). Anyone else gets a 404 from `/api/records`.
+
+The page reads every record on each visit, which is fine for thousands of runs on one disk; Phase 2's database is where they move after that.
+
 ## Run it locally
 
 ```
@@ -91,7 +103,7 @@ Open `http://localhost:8787` (not 127.0.0.1: the address must match `PUBLIC_URL`
 
 ```
 ANTHROPIC_API_KEY=sk-ant-... npm run dev      # cloud runs too
-npm test                                      # 40 tests, no network needed
+npm test                                      # 46 tests, no network needed
 ```
 
 ## Deploy on Render
@@ -128,6 +140,7 @@ The blueprint uses the Starter instance because Render disks need a paid instanc
 | `LIFTOFF_PASS_USD` | The Launch Pass price in US dollars (default 149). |
 | `LIFTOFF_PASS_CLAUDE_USD` | Claude time included with each pass, in US dollars of model spend (default 50). |
 | `LIFTOFF_FREE_LOGINS` | GitHub logins that get every pass free, comma-separated. |
+| `LIFTOFF_ADMIN_LOGINS` | GitHub logins that can see the run records, comma-separated. If an admin renames their GitHub account, update this. |
 
 ## Security notes
 
@@ -157,6 +170,7 @@ cloud/
     proof.mjs         the purchase test: queue, Stripe cancel, screenshots, result
     report.mjs        launch reports: certification, the public page, the badge
     billing.mjs       the Launch Pass: Stripe Checkout, webhook, Claude time
+    records.mjs       run records: one per run, scrubbed, and the admin numbers
     store.mjs         file storage
     crypto.mjs, http.mjs, config.mjs
   public/             the web app's pages (the Flight Board itself is ../dashboard)
