@@ -77,20 +77,21 @@ test('each category uses the recorded provider, else what the code uses, else th
   assert.deepEqual(accountsForStep(step('paywall'), ['ios'], { payments: 'paddle' }), ['revenuecat']);
   assert.deepEqual(accountsForStep(step('hosting'), ['web'], { hosting: 'netlify' }), ['netlify']);
   assert.deepEqual(accountsForStep(step('database'), ['web'], { database: 'custom-mydb' }), ['custom-mydb']);
-  const all = accountsFor(['web'], { payments: 'polar', email: 'postmark' });
+  const all = accountsFor(['web'], undefined, { payments: 'polar', email: 'postmark' });
   assert.ok(all.includes('polar') && all.includes('postmark') && !all.includes('stripe') && !all.includes('resend'));
 });
 
 test('Lemon Squeezy apps get a dated, non-blocking notice to move before it shuts down', () => {
-  const notice = paperworkFor(['web'], { lemonsqueezy: true }).find((w) => w.key === 'lemonsqueezy-shutdown');
+  const notice = paperworkFor(['web'], undefined, ['lemonsqueezy']).find((w) => w.key === 'lemonsqueezy-shutdown');
   assert.equal(notice.blocks, false);
   assert.equal(notice.notice, true);
   assert.match(notice.title, /March 31, 2027/);
-  assert.ok(!paperworkFor(['web'], { stripe: true }).some((w) => w.key === 'lemonsqueezy-shutdown'));
+  assert.ok(!paperworkFor(['web'], undefined, ['stripe']).some((w) => w.key === 'lemonsqueezy-shutdown'));
 });
 
 test('Liftoff proves an item only when it can check the service the app uses', () => {
-  const web = (uses, extra = {}) => ({ platforms: ['web'], steps: {}, integrations: {}, payments: [], ...extra, uses });
+  // The owner says the app takes payments, so the purchase test applies.
+  const web = (uses, extra = {}) => ({ platforms: ['web'], steps: {}, integrations: {}, payments: [], profile: { set: { payments: true } }, ...extra, uses });
   const can = (id, uses, extra) => canProve(web(uses, extra), id, { uses });
   assert.equal(can('pay-webhook', { payments: 'stripe' }), true);
   assert.equal(can('pay-webhook', { payments: 'paddle' }), true);
