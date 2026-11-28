@@ -120,6 +120,9 @@ const ICONS = {
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
   activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  monitor: '<rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/>',
 };
 function icon(name, cls = '') {
   const span = document.createElement('span');
@@ -218,6 +221,23 @@ function placeNavPill() {
   pill.classList.add('on');
 }
 
+// The quick light/dark switch in the top bar. theme.js keeps the choice; a host
+// page can also save it (the themeChanged hook).
+const Theme = () => window.LiftoffTheme || null;
+function setTheme(pref) {
+  const T = Theme();
+  if (!T) return;
+  T.set(pref);
+  hook('themeChanged', T.get());
+}
+function themeButton() {
+  const T = Theme();
+  if (!T) return null;
+  const dark = T.resolved() === 'dark';
+  const label = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  return h('button', { class: 'btn quiet icon-only theme-btn', type: 'button', title: label, 'aria-label': label, onclick: () => setTheme(Theme().resolved() === 'dark' ? 'light' : 'dark') }, icon(dark ? 'sun' : 'moon'));
+}
+
 function renderTopbar(app) {
   const crumbs = [h('button', { class: 'crumb', onclick: () => go('overview') }, HOOKS.brand || 'Flight Board')];
   const extra = HOOKS.views?.[state.view];
@@ -228,6 +248,7 @@ function renderTopbar(app) {
   else crumbs.push(sep(), h('b', {}, 'Overview'));
   morph($('topbar'), [...crumbs,
     h('span', { class: 'sync', title: 'Refreshes every few seconds' }, h('span', { class: 'status-dot live' }), state.lastSync ? 'Synced' : 'Connecting…'),
+    themeButton(),
     hook('topbarEnd')]);
 }
 
@@ -626,6 +647,8 @@ function start() {
     el.style.setProperty('--my', `${Math.round(e.clientY - r.top)}px`);
   }, { passive: true });
   addEventListener('resize', placeNavPill, { passive: true });
+  // theme.js says when the theme changes (your pick, or the device switching).
+  addEventListener('liftoff-theme', () => repaint());
   const hash = decodeURIComponent(location.hash.slice(1));
   if (hash === 'accounts') state.view = 'accounts';
   else if (hash.startsWith('!') && HOOKS.views?.[hash.slice(1)]) state.view = hash.slice(1);
@@ -639,5 +662,5 @@ function start() {
   setTimeout(tick, hook('pollMs') || 4000);
 }
 
-window.Board = { configure, start, state, h, icon, api, mutate, go, render, refresh, toast, copy, ago, colorFor, avatar, host, plural, money, morph, repaint, PLATFORM, STEP_WORD, ICONS };
+window.Board = { configure, start, state, h, icon, api, mutate, go, render, refresh, toast, copy, ago, colorFor, avatar, host, plural, money, morph, repaint, setTheme, PLATFORM, STEP_WORD, ICONS };
 if (!document.body.hasAttribute('data-board-manual')) start();

@@ -191,6 +191,11 @@ export function fakeAnthropic(scenario = async () => {}) {
           calls.push(['vaults.create', params]);
           return { id: v.id };
         },
+        async delete(vaultId) {
+          calls.push(['vaults.delete', vaultId]);
+          if (!vaults.delete(vaultId)) throw Object.assign(new Error('not found'), { status: 404, headers: {} });
+          return { id: vaultId, type: 'vault_deleted' };
+        },
         credentials: {
           async create(vaultId, params) {
             const c = { id: id('vcrd'), params };

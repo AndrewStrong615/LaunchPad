@@ -27,6 +27,17 @@ const PAGES = {
 };
 const SID_COOKIE = 'lc_sid';
 const STATE_COOKIE = 'lc_oauth';
+const THEMES = ['system', 'light', 'dark'];
+
+// Account settings kept on the user: how the app looks and the model runs
+// default to. Anything unknown reads as "not set".
+function prefsOf(user) {
+  const p = user.prefs || {};
+  return {
+    theme: THEMES.includes(p.theme) ? p.theme : 'system',
+    model: MODELS.some((m) => m.id === p.model) ? p.model : null,
+  };
+}
 
 // A small fixed-window limiter, per process.
 function limiter() {
@@ -151,24 +162,87 @@ export function createApp(ctx) {
     throw new HttpError(404, 'Not found');
   }
 
+  // ---------- deleting an account ----------
+
+  // Keys mirrored into Claude's vault go first: if that fails nothing is
+  // deleted, so no key is left behind without a record of it. Taking back the
+  // GitHub grant is best effort (the person can also do it on GitHub).
+  async function deleteAccount(uid) {
+    const secrets = store.getSecrets(uid);
+    if (secrets.vault?.id) {
+      if (runs.client) {
+        try {
+          await runs.client.beta.vaults.delete(secrets.vault.id);
+        } catch (err) {
+          if (err?.status !== 404) {
+            console.error(`[liftoff-cloud] deleting vault ${secrets.vault.id} for ${uid}:`, err?.message || err);
+            throw new HttpError(502, "Couldn't remove your keys from Claude's vault just now, so nothing was deleted. Try again in a minute.");
+          }
+        }
+      } else console.warn(`[liftoff-cloud] ${uid} deleted their account; vault ${secrets.vault.id} is still in the Anthropic account (no API key on this server to delete it).`);
+    }
+    let token = null;
+    try {
+      token = secrets.github ? store.decrypt(secrets.github) : null;
+    } catch {}
+    const githubRevoked = token ? await github.revokeGrant(token).catch(() => false) : null;
+    store.deleteUser(uid);
+    return { githubRevoked };
+  }
+
+  function meModels(uid) {
+    return { choices: MODELS, default: runs.defaultModel(uid), server: runs.defaultModel() };
+  }
+
   // ---------- API ----------
 
-  async function api(req, res, url, user) {
+  async function api(req, res, url, user, sid) {
     const uid = user.id;
     const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent).slice(1);
     const M = req.method;
     const ok = (body) => send(res, 200, body);
 
-    if (parts[0] === 'me' && M === 'GET') {
+    if (parts[0] === 'me' && parts.length === 1 && M === 'GET') {
       const ready = runs.readiness();
+      const secrets = store.getSecrets(uid);
       return ok({
-        user: { login: user.login, name: user.name, avatar: user.avatar },
-        github: { signedIn: !!store.getSecrets(uid).github, token: !!githubToken(store, uid), oauth: github.oauthEnabled },
+        user: { login: user.login, name: user.name, avatar: user.avatar, createdAt: user.createdAt || null, via: user.githubId ? 'github' : 'local' },
+        prefs: prefsOf(user),
+        github: { signedIn: !!secrets.github, token: !!githubToken(store, uid), oauth: github.oauthEnabled, scope: secrets.github ? secrets.githubScope || '' : null },
         claude: ready,
-        models: { choices: MODELS, default: runs.defaultModel() },
+        models: meModels(uid),
         limits: { uploadMb: Math.round(config.maxUploadBytes / 1048576), runBudgetUsd: config.runBudgetUsd, maxRuns: config.maxRunsPerUser },
         settings: CONFIG_KEYS,
       });
+    }
+
+    // ----- Account settings -----
+    if (parts[0] === 'me' && parts[1] === 'prefs' && parts.length === 2 && M === 'POST') {
+      limit(`prefs:${uid}`, 60, 60000);
+      const body = await readJson(req);
+      const prefs = prefsOf(user);
+      if ('theme' in body) {
+        if (!THEMES.includes(body.theme)) throw new HttpError(400, 'Theme is one of: system, light, dark.');
+        prefs.theme = body.theme;
+      }
+      if ('model' in body) {
+        if (body.model !== null && !MODELS.some((m) => m.id === body.model)) throw new HttpError(400, `Pick one of these models: ${MODELS.map((m) => m.label).join(', ')}.`);
+        prefs.model = body.model;
+      }
+      const saved = store.saveUser({ ...store.getUser(uid), prefs });
+      return ok({ prefs: prefsOf(saved), models: meModels(uid) });
+    }
+    if (parts[0] === 'me' && parts[1] === 'sign-out-others' && parts.length === 2 && M === 'POST') {
+      limit(`sessions:${uid}`, 10, 60000);
+      return ok({ ended: store.endSessions(uid, sid) });
+    }
+    if (parts[0] === 'me' && parts.length === 1 && M === 'DELETE') {
+      limit(`delete:${uid}`, 5, 60000);
+      const body = await readJson(req);
+      if (String(body.confirm || '').trim().toLowerCase() !== String(user.login).toLowerCase()) throw new HttpError(400, `Type ${user.login} to confirm.`);
+      if (runs.hasOpenRuns(uid)) throw new HttpError(409, 'Stop your Claude runs first, then delete your account.');
+      const done = await deleteAccount(uid);
+      return send(res, 200, { deleted: true, ...done }, 'application/json; charset=utf-8', { 'set-cookie': cookie(SID_COOKIE, '', { maxAge: 0, secure }) });
     }
 
     if (parts[0] === 'accounts') {
@@ -352,7 +426,7 @@ export function createApp(ctx) {
         if (req.method !== 'GET' && !zip && req.headers['content-length'] !== '0' && !String(req.headers['content-type'] || '').startsWith('application/json')) {
           throw new HttpError(415, 'Send JSON');
         }
-        return await api(req, res, url, me.user);
+        return await api(req, res, url, me.user, me.sid);
       }
       throw new HttpError(404, 'Not found');
     } catch (err) {
