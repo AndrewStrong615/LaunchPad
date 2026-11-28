@@ -63,9 +63,11 @@ Picked per app from the platforms it ships to (web, iOS, Android) and from what 
 
 ### Tailored to what the app does
 
-`liftoff init` works out what the app does from its code: takes payments, signs people in, saves data on a server, sends email, uses AI models, takes uploads, or shows what people post. Each is found (a library for it, like Stripe), likely (a hint, like a pricing page, or what another implies: paying customers need accounts), or not seen. The launch follows it:
+`liftoff init` works out what the app does from its code: takes payments, signs people in, saves data on a server, sends email, uses AI models, takes uploads, or shows what people post. Each is found (a library for it, like Stripe), likely (a hint, like a pricing page, or what another implies: paying customers need accounts), or not built yet.
 
-- **Steps**: a free app with no accounts skips Database, Sign-in, Email, Payments, Paywall and the purchase flow test (7 steps for a simple web app instead of 13). Apps with AI, uploads or posts get an extra **Abuse and spend limits** step (`safety`).
+Code only ever adds to a launch. Most apps launch before they've built payments, sign-in, a database or email, so those four stay in until you say the app won't need them. The extras (AI, uploads, posts) come in when the code shows them or you turn them on. The launch follows it:
+
+- **Steps**: tell Liftoff a site takes no payments, has no sign-in and keeps no data, and it skips Database, Sign-in, Email, Payments, Paywall and the purchase flow test (7 steps for a simple web app instead of 13). Apps with AI, uploads or posts get an extra **Abuse and spend limits** step (`safety`). Steps that aren't part of the launch stay in sight on the Flight Board under **Not part of this launch**, each with an Add button.
 - **Needs you**: paperwork only for what applies. Stripe activation, the Paid Apps Agreement and the Play payments profile only for apps that take payments; an AI spend-limit task for apps that use AI models. Open paperwork that stops applying leaves the list.
 - **Readiness checks**: payment, sign-in, email and database checks only where they fit, plus extra checks for AI features, uploads and what people post (App Store guideline 1.2). The readiness score counts only these.
 

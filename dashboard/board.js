@@ -465,6 +465,7 @@ function taskRow(app, t, showApp) {
 // the top; after, as one line above the steps that opens again.
 function featureNote(f) {
   if (f.source === 'you') return f.inCode && !f.on ? `Set by you (${f.inCode})` : 'Set by you';
+  if (f.source === 'unsure') return 'Not in the code yet. Kept in case the app needs it';
   if (f.on) return f.why || 'Found in the code';
   return f.hint;
 }
@@ -500,6 +501,44 @@ function featureSwitches(app) {
   h('span', { class: 'ft' }, h('b', {}, f.label), h('span', { class: 'small' }, featureNote(f))))));
 }
 
+// Steps this app's platforms have that don't fit what it does, kept in
+// sight under the launch steps. Add turns on what the step is for; a step
+// for several things opens the switches instead.
+function openProfile(app) {
+  state.open[`profile:${app.slug}`] = true;
+  render();
+  document.querySelector('.does')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function leftOutSteps(app) {
+  const list = app.leftOut || [];
+  if (!list.length || !app.profile) return null;
+  const add = (s, btn) => {
+    const f = s.features.length === 1 && app.profile.features.find((x) => x.id === s.features[0]);
+    if (f && !f.on) toggleFeature(app, f, btn);
+    else openProfile(app);
+  };
+  return h('div', { class: 'left-out' },
+    h('div', { class: 'lo-head' },
+      h('b', {}, 'Not part of this launch'), h('span', { class: 'count' }, list.length),
+      h('span', { class: 'small' }, 'Turned off for this app, or not called for by its code. Add any it will need.')),
+    h('div', { class: 'roadmap lo' }, list.map((s) => h('div', { class: 'step left', key: s.id },
+      h('div', { class: 'lo-top' },
+        h('div', { class: 'lbl' }, icon('minus'), h('span', {}, s.label)),
+        h('button', { class: 'btn quiet sm', type: 'button', 'aria-label': `Add ${s.label}`, onclick: (e) => add(s, e.currentTarget) }, icon('plus'), 'Add')),
+      h('div', { class: 'note' }, s.for ? `Only if it ${s.for}` : 'Doesn’t fit this app')))));
+}
+
+// "16 checks left out (Payments 8, Sign-in 3, …)"
+function leftOutChecks(app) {
+  const list = app.checksLeftOut || [];
+  const n = list.reduce((t, c) => t + c.count, 0);
+  if (!n || !app.profile) return null;
+  return h('div', { class: 'lo-checks small' },
+    h('span', {}, `${plural(n, 'check')} left out as not needed: ${list.map((c) => `${c.category} ${c.count}`).join(', ')}.`),
+    h('button', { class: 'linkish', type: 'button', onclick: () => openProfile(app) }, 'Change what this app does'));
+}
+
 function confirmProfile(app, btn) {
   btn.disabled = true;
   delete state.open[`profile:${app.slug}`];
@@ -527,7 +566,7 @@ function profileCard(app) {
       h('span', { class: 'end sub' }, asking ? 'Liftoff’s guess from the code' : 'Confirmed by you')),
     h('div', { class: 'card-body' },
       h('p', { class: 'small lead' }, asking
-        ? 'The launch steps, what needs you and the readiness checks follow from this. Turn off anything that doesn’t apply, and turn on anything still to come.'
+        ? 'The launch steps, what needs you and the readiness checks follow from this. Anything not built yet stays in, in case the app needs it. Turn off what it won’t.'
         : 'Change this whenever the app changes. The steps and checks follow at once, and nothing you’ve done is lost.'),
       featureSwitches(app),
       h('div', { class: 'does-foot' },
@@ -581,7 +620,8 @@ function renderApp(app) {
           h('div', { class: 'note' }, s.stale ? 'Stalled: run it again'
             : st === 'todo' && s.waitingOn?.length ? `Waits on ${s.waitingOn.map((id) => app.steps.find((x) => x.id === id)?.label || id).join(', ')}`
             : s.note || (s.provider ? `${STEP_WORD[st]} · ${s.provider}` : STEP_WORD[st])));
-      }))),
+      })),
+      leftOutSteps(app)),
 
     h('div', { class: 'cols' },
       h('div', { class: 'stack' },
@@ -615,7 +655,8 @@ function renderApp(app) {
                 h('input', { type: 'checkbox', checked: c.done, onchange: (e) => mutate(`/api/apps/${app.slug}/checklist/${c.id}`, 'POST', { done: e.target.checked }) }),
                 h('span', { class: 'tx' }, c.title, c.verify?.ok === false ? h('span', { class: 'why' }, c.verify.detail) : null),
                 c.done && c.by ? h('span', { class: 'by' }, c.by === 'verified' ? 'verified' : `by ${hook('whoTicked', c.by) || c.by}`) : null))));
-          })),
+          }),
+          leftOutChecks(app)),
         hook('mainBottom', app)),
 
       h('div', { class: 'stack' },

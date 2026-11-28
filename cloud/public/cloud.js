@@ -464,7 +464,7 @@
         // What the app does: the steps, to-dos and checks above follow it.
         app.profile ? h('div', { class: 'ob-does' },
           h('div', { class: 'ob-does-head' }, h('b', {}, `What ${app.name} does`), h('span', { class: 'pill sm' }, app.profile.sizeLabel)),
-          h('p', { class: 'small' }, 'Liftoff guessed this from the code, and picked the launch steps and checks to fit. Fix anything that’s wrong.'),
+          h('p', { class: 'small' }, 'Liftoff read this from the code. Anything not built yet stays in the launch in case the app needs it. Turn off what it won’t.'),
           Board.featureSwitches(app)) : null),
       obActs(
         obNext('Continue', () => {

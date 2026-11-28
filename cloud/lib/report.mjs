@@ -46,6 +46,8 @@ export function profileFacts(state) {
   return {
     size: p.size,
     does: p.features.filter((f) => f.on).map((f) => f.id),
+    // Kept in though nothing in the code does it yet.
+    unsure: p.unsure,
     overridden: p.overridden,
   };
 }
@@ -302,13 +304,21 @@ export function renderReport(report, { home = '/', assistant = DEFAULT_ASSISTANT
   const prof = r.app.profile;
   let tailored = '';
   if (prof && Array.isArray(prof.does)) {
-    const on = Object.fromEntries(prof.does.filter((id) => FEATURE[id]).map((id) => [id, true]));
-    const yes = describe(on);
+    const pick = (ids) => Object.fromEntries((ids || []).filter((id) => FEATURE[id]).map((id) => [id, true]));
+    const on = pick(prof.does);
+    const kept = pick(prof.unsure);
+    const yes = describe(Object.fromEntries(Object.keys(on).filter((id) => !kept[id]).map((id) => [id, true])));
     // What it doesn't do, for the parts that change a launch most.
     const no = describe({ ...on, email: true, ai: true, uploads: true, community: true }, { negative: true });
+    const name = esc(r.app.name);
+    const checked = yes ? `It checked ${name} as an app that ${esc(yes)}${no ? ` (it ${esc(no)})` : ''}.`
+      : !Object.keys(kept).length ? `It checked ${name} as a simple app${no ? ` (it ${esc(no)})` : ''}.`
+      : no ? `It checked ${name} as an app that ${esc(no)}.` : '';
+    // Not built yet isn't the same as not needed, so those checks still count.
+    const stays = Object.keys(kept).length ? ` Nothing in its code ${esc(describe(kept, { or: true }))} yet, so those checks stay in until the team says the app won't need them.` : '';
     const owner = (prof.overridden || []).filter((id) => FEATURE[id]);
     const said = owner.length ? ` The team says it ${owner.map((id) => FEATURE[id].doesnt).join(' and ')}, though its code suggests otherwise, so those checks weren't required.` : '';
-    tailored = `<p class="tailored">Liftoff tailors its checks to what an app does. It checked ${esc(r.app.name)} as ${yes ? `an app that ${esc(yes)}` : 'a simple app'}${no ? ` (it ${esc(no)})` : ''}.${esc(said)}</p>`;
+    tailored = `<p class="tailored">Liftoff tailors its checks to what an app does.${checked ? ` ${checked}` : ''}${stays}${esc(said)}</p>`;
   }
   const live = r.app.liveUrl && /^https?:\/\//.test(r.app.liveUrl) ? `<a href="${esc(r.app.liveUrl)}" rel="nofollow noopener">${esc(r.app.liveUrl.replace(/^https?:\/\//, '').replace(/\/$/, ''))}</a>` : '';
   const verdict = r.certified

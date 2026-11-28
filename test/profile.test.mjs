@@ -30,24 +30,49 @@ function makeApp(name, files) {
 const ids = (xs) => xs.map((x) => x.id);
 const keys = (s) => s.tasks.filter((t) => t.key && !t.done).map((t) => t.key);
 
-test('a simple site gets a short launch: no payments, sign-in or Stripe paperwork', () => {
+test('what the code doesn\'t have yet stays in the launch until the owner says the app won\'t need it', () => {
   const dir = makeApp('portfolio', {
     'package.json': { name: 'portfolio', dependencies: { next: '15', react: '19' } },
     'app/page.tsx': 'export default () => <h1>Hi</h1>',
   });
   const s = state.initProject(dir);
-  const sum = state.summarize(s);
-  assert.deepEqual(Object.values(sum.features), [false, false, false, false, false, false, false]);
+  let sum = state.summarize(s);
+  // Nothing built yet: every original step is there, and the extras aren't.
+  assert.deepEqual(sum.profile.unsure, ['payments', 'accounts', 'database', 'email']);
+  assert.deepEqual(Object.values(sum.features), [true, true, true, true, false, false, false]);
+  assert.deepEqual(ids(sum.steps).sort(), STEPS.filter((x) => (!x.platforms || x.platforms.includes('web')) && x.id !== 'safety').map((x) => x.id).sort());
+  assert.ok(keys(s).includes('stripe-activate'));
+  assert.deepEqual(ids(sum.leftOut), ['safety']);
+  assert.equal(sum.leftOut[0].for, 'uses AI models or takes file uploads or shows what people post');
+
+  // The owner says it's a simple site: a short launch.
+  for (const f of ['payments', 'accounts', 'database', 'email']) state.setFeature(s, f, false);
+  sum = state.summarize(s);
   assert.equal(sum.profile.size, 'simple');
+  assert.deepEqual(sum.profile.unsure, []);
   for (const id of ['payments', 'paywall', 'money-test', 'auth', 'database', 'email', 'safety']) {
     assert.ok(!ids(sum.steps).includes(id), `no ${id} step`);
   }
+  assert.equal(sum.stepsTotal, 7);
   assert.ok(ids(sum.steps).includes('hosting'));
-  assert.ok(sum.stepsTotal < stepsFor(['web']).length);
   assert.ok(!sum.checklist.some((c) => c.id.startsWith('pay-') || c.id.startsWith('auth-')));
   assert.ok(!keys(s).includes('stripe-activate'));
-  assert.equal(sum.checksTotal, sum.checklist.length);
   assert.ok(sum.checksTotal < checklistFor(['web']).length);
+  // What's left out stays in sight, with what it's for.
+  assert.deepEqual(ids(sum.leftOut), ['database', 'auth', 'payments', 'paywall', 'email', 'safety', 'money-test']);
+  assert.equal(sum.leftOut.find((x) => x.id === 'auth').for, 'signs people in');
+  assert.ok(sum.checksLeftOut.some((c) => c.category === 'Payments and paywall' && c.count > 0));
+  assert.deepEqual(sum.profile.overridden, [], 'none of it was in the code');
+});
+
+test('a yes to something not built yet is kept as the owner\'s word, and counts as known', async () => {
+  const { knownFeatures } = await import('../lib/profile.mjs');
+  const s = state.initProject(makeApp('todo', { 'package.json': { name: 'todo', dependencies: { next: '15', react: '19' } } }));
+  assert.equal(knownFeatures(s).payments, false, 'kept in, but not known');
+  state.setFeature(s, 'payments', true);
+  assert.equal(s.profile.set.payments, true);
+  assert.equal(knownFeatures(s).payments, true);
+  assert.equal(profileView(s).features.find((f) => f.id === 'payments').source, 'you');
 });
 
 test('a SaaS app with Stripe and Supabase gets payments, sign-in, data and email', () => {

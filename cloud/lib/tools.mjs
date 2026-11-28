@@ -118,7 +118,7 @@ export function planFor(state, accounts, envPlan) {
     // What the app does. The steps and checks below only cover what's on.
     profile: {
       size: summary.profile.size,
-      does: summary.profile.features.filter((f) => f.on).map((f) => ({ id: f.id, label: f.label, from: f.source === 'you' ? 'the user' : f.source === 'code' ? 'the code' : f.source === 'launch' ? 'launch progress' : 'a guess from the code' })),
+      does: summary.profile.features.filter((f) => f.on).map((f) => ({ id: f.id, label: f.label, from: f.source === 'you' ? 'the user' : f.source === 'code' ? 'the code' : f.source === 'launch' ? 'launch progress' : f.source === 'unsure' ? 'not built yet; kept until the user says the app won’t need it' : 'a guess from the code' })),
       doesNot: summary.profile.features.filter((f) => !f.on).map((f) => ({ id: f.id, label: f.label, from: f.source === 'you' ? 'the user' : 'nothing in the code' })),
       confirmedByUser: !!summary.profile.confirmedAt,
     },

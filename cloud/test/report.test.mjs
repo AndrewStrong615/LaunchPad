@@ -127,8 +127,14 @@ test('the public page says what the checks fit, and what the team turned off tha
   const page = (state, a) => renderReport({ id: 'rp_AAAAAAAAAAAAAAAAAAAA', createdAt: new Date(NOW).toISOString(), app: { name: state.name, framework: 'nextjs', platforms: ['web'], liveUrl: state.liveUrl, profile: profileFacts(state) }, ...a, purchase: null });
   let html = page(plain, a);
   assert.equal(a.certified, true);
-  assert.match(html, /<p class="tailored">Liftoff tailors its checks to what an app does\. It checked Invoicely as a simple app \(it doesn('|’|&#39;)t take payments, has no sign-in/);
+  // Nothing built yet: those checks stay in until the team says otherwise.
+  assert.match(html, /<p class="tailored">Liftoff tailors its checks to what an app does\. Nothing in its code takes payments, signs people in, saves data on a server or sends email yet, so those checks stay in until the team says the app won('|’|&#39;)t need them\.<\/p>/);
   assert.doesNotMatch(html, /The team says/);
+
+  // The team says it's a simple site.
+  const simple = app({ checklist: allProven(), profile: { detected: {}, set: { payments: false, accounts: false, database: false, email: false } } });
+  html = page(simple, assess(simple, { now: NOW }));
+  assert.match(html, /It checked Invoicely as a simple app \(it doesn('|’|&#39;)t take payments, has no sign-in and keeps no data on a server\)\.<\/p>/);
 
   // Stripe is in the code but the team says it takes no payments: still
   // certified on the rest, and the page says so.

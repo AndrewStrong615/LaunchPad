@@ -69,8 +69,8 @@ test('init picks steps for the platforms and auto-ticks what exists', () => {
   assert.ok(m.steps.testflight && m.steps['play-testing'] && m.steps['store-checks']);
   assert.ok(!m.steps.hosting, 'mobile-only app has no web hosting step');
   assert.ok(m.checklist['ios-age']);
-  assert.ok(!m.checklist['ios-delete'], 'no sign-in, so no account deletion check');
-  assert.ok(!m.steps.payments, 'nothing in the code takes payments');
+  assert.ok(m.steps.payments && m.checklist['ios-delete'], 'not built yet is not the same as not needed: kept until the owner says');
+  assert.ok(!m.steps.safety, 'no AI, uploads or posts in the code');
 });
 
 test('re-running init keeps progress', () => {

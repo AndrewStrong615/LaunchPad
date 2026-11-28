@@ -8,7 +8,7 @@ import readline from 'node:readline';
 import { ACCOUNTS, STEPS, accountsFor, accountsForStep, needsFor, stepsFor } from '../lib/catalog.mjs';
 import {
   CONFIG_KEYS, addDeploy, addTask, confirmProfile, connectAccount, credentialEnv, disconnectAccount, findProject, initProject,
-  listAccounts, listProjects, loadState, migrateToKeychain, recordChange, removeTask, resetStep, saveState,
+  leftOutFor, listAccounts, listProjects, loadState, migrateToKeychain, recordChange, removeTask, resetStep, saveState,
   secretStore, setCheck, setConfig, setFeature, setStep, setTaskDone, summarize, undoPlan, waitingOn,
 } from '../lib/state.mjs';
 import { FEATURE_IDS, featuresOf, profileView } from '../lib/profile.mjs';
@@ -177,7 +177,7 @@ async function main() {
       const sum = summarize(s);
       if (flags.json) return out(JSON.stringify({ ...p, steps: sum.stepsTotal, checks: sum.checksTotal }, null, 2));
       out(`${s.name}: ${p.sizeLabel.toLowerCase()} (${sum.stepsTotal} launch steps, ${sum.checksTotal} checks)`);
-      const from = { you: 'set by you', code: 'found in the code', hint: 'likely', launch: 'the launch is doing it', scan: 'not seen' };
+      const from = { you: 'set by you', code: 'found in the code', hint: 'likely', launch: 'the launch is doing it', unsure: 'not built yet, kept in case the app needs it', scan: 'not seen' };
       for (const f of p.features) out(`  ${f.on ? '✓' : '·'} ${f.id.padEnd(10)} ${f.label.padEnd(24)} ${from[f.source]}${f.why ? `: ${f.why}` : ''}`);
       out(p.confirmedAt ? `Confirmed ${p.confirmedAt.slice(0, 10)}.` : 'Not confirmed yet: fix anything wrong with `liftoff profile <feature> on|off`, then `liftoff profile --confirm`.');
       return;
@@ -206,6 +206,11 @@ async function main() {
         const wait = p.status !== 'done' && p.waitingOn.length ? `  waits on ${p.waitingOn.join(', ')}` : '';
         out(`  ${icon[p.status]} ${p.label.padEnd(20)} skill: ${p.skill.padEnd(18)} ${acc}${wait}`);
         if (flags.explain) out(`      ${p.does}`);
+      }
+      const left = leftOutFor(s, features).steps;
+      if (left.length) {
+        out('\n  Not part of this launch:');
+        for (const x of left) out(`  · ${x.label.padEnd(22)} only if it ${x.for}: liftoff profile ${x.features[0]} on`);
       }
       if (flags.explain) out('\nNothing that spends money, changes DNS, goes live or submits to a store happens without your yes.');
       return;
