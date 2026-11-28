@@ -397,6 +397,23 @@ pre.cmd::before { content: "$ "; color: #8f8fa6; }
 .history .line:hover { background: var(--hover); }
 .findings li { margin: 8px 0; }
 
+/* Liftoff's purchase test */
+.proof-what { margin: 10px 0 4px; color: var(--muted); }
+.proof-block { margin: 8px 0; padding: 8px 12px; border-radius: 10px; background: var(--warn-soft); color: var(--warn); font-size: 13px; }
+.proof-steps { list-style: none; margin: 8px 0 4px; padding: 0; display: flex; flex-direction: column; }
+.proof-steps li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line-2); }
+.proof-steps li:first-child { border-top: 0; }
+.proof-steps li > .i { flex: none; width: 16px; height: 16px; }
+.proof-steps li.ok > .i { color: var(--good-dot); }
+.proof-steps li.no > .i { color: var(--bad); }
+.proof-steps li.now > .i { color: var(--run); animation: spin 1.2s linear infinite; }
+.proof-steps .name { font-size: 13px; color: var(--ink); }
+.proof-steps .grow { min-width: 0; overflow-wrap: anywhere; }
+.proof-steps .shot { flex: none; display: block; width: 96px; height: 60px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); background: var(--hover); transition: transform var(--fast); }
+.proof-steps .shot:hover { transform: scale(1.04); }
+.proof-steps .shot img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.proof .row { padding-top: 6px; }
+
 /* settings */
 .set { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 4px 14px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line-2); }
 .set:first-child { border-top: 0; }
@@ -456,6 +473,7 @@ dialog.modal .acts { display: flex; gap: 8px; justify-content: flex-end; margin-
 }
 @media (max-width: 820px) {
   .set { grid-template-columns: minmax(0, 1fr); }
+  .proof-steps .shot { width: 64px; height: 44px; }
   .run-head { flex-wrap: wrap; }
   .run-head .actions { width: 100%; justify-content: flex-start; margin-left: 0; }
   .run-head .actions .btn.quiet { display: none; }

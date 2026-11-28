@@ -1,0 +1,9 @@
+# Only the test browser (proof/Dockerfile) builds with Docker; it needs proof/ and cloud/lib/safe-fetch.mjs.
+**/node_modules
+.git
+.liftoff
+data
+test
+cloud/test
+proof/test
+docs

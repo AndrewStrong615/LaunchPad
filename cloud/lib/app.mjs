@@ -67,6 +67,7 @@ export function createApp(ctx) {
         scan: state.lastScan ? { at: state.lastScan.at, failing: state.lastScan.findings.filter((f) => !f.ok && s.checklist.some((c) => c.id === f.id)) } : null,
         run: latest ? { id: latest.id, status: latest.status, pending: latest.pending.length, cost: latest.cost, pr: latest.pr || null, createdAt: latest.createdAt } : null,
         runs: all.length,
+        proof: ctx.proof.view(uid, state),
       },
     };
   }
@@ -222,6 +223,7 @@ export function createApp(ctx) {
       if (rest.length === 0 && M === 'GET') return ok(view(uid, state));
       if (rest.length === 0 && M === 'DELETE') {
         if (runs.list(uid, slug).some((r) => LIVE.has(r.status) || r.status === 'budget')) throw new HttpError(409, 'Stop the run first.');
+        if (ctx.proof.running(uid, slug)) throw new HttpError(409, 'Wait for the purchase test to finish.');
         store.deleteApp(uid, slug);
         return ok({ deleted: slug });
       }
@@ -237,6 +239,19 @@ export function createApp(ctx) {
       if (rest[0] === 'pulse' && M === 'POST') {
         limit(`verify:${uid}`, 20, 60000);
         return ok(view(uid, await pulseApp(ctx, uid, slug)));
+      }
+      if (rest[0] === 'proof') {
+        // Liftoff's own purchase test (lib/proof.mjs): start it, or fetch a screenshot.
+        if (rest.length === 1 && M === 'POST') {
+          limit(`proof:${uid}`, 6, 3600000);
+          ctx.proof.start(uid, slug);
+          return ok(view(uid, store.loadApp(uid, slug)));
+        }
+        if (rest.length === 3 && M === 'GET') {
+          const body = ctx.proof.shot(uid, slug, rest[1], rest[2]);
+          res.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': body.length, 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' });
+          return res.end(body);
+        }
       }
       if (rest[0] === 'tasks') {
         if (M === 'POST' && rest.length === 1) {

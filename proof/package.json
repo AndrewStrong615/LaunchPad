@@ -1,0 +1,16 @@
+{
+  "name": "liftoff-proof",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Liftoff's test browser: runs an app's purchase flow test in Chromium for Liftoff Cloud, on its own private server.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "playwright": "1.63.0"
+  },
+  "license": "MIT"
+}

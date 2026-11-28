@@ -291,6 +291,42 @@
       }))));
   }
 
+  // Liftoff's own purchase test: its browser buys Pro on the app's test-mode
+  // deploy, and Stripe's records decide. Screenshots open full size.
+  const PROOF_WORD = { queued: 'Waiting its turn', running: 'Testing', passed: 'Passed', failed: 'Failed', error: "Didn't finish" };
+  const PROOF_TONE = { queued: 'run', running: 'run', passed: 'good', failed: 'bad', error: 'warn' };
+  const PROOF_NEXT = ['Opening the app', 'Signing up', 'Paying with the test card', 'Waiting for Pro to unlock', 'Cancelling in Stripe', 'Waiting for Pro to lock', "Checking Stripe's records"];
+  const hostOf = (u) => { try { return new URL(u).host; } catch { return null; } };
+
+  function proofCard(app) {
+    const p = app.cloud?.proof;
+    if (!p || !p.applies) return null;
+    const last = p.latest;
+    const live = !!last && (last.status === 'queued' || last.status === 'running');
+    const steps = last?.steps || [];
+    const start = (e) => busy(e.currentTarget, async () => {
+      await post(`/api/apps/${app.slug}/proof`);
+      toast('Purchase test started. It takes a few minutes.');
+      await refresh(true);
+    });
+    const when = !last ? 'Not run yet' : live ? `Started ${ago(last.startedAt || last.createdAt)}` : ago(last.endedAt || last.createdAt);
+    return h('section', { class: 'card proof' },
+      h('div', { class: 'card-head' }, icon('shield'), h('h2', {}, 'Purchase test'),
+        last ? h('span', { class: `pill sm ${PROOF_TONE[last.status] || ''}` }, live ? h('span', { class: 'd' }) : null, PROOF_WORD[last.status] || last.status) : null,
+        h('span', { class: 'end sub' }, when)),
+      h('div', { class: 'card-body' },
+        h('p', { class: 'small proof-what' }, `Liftoff opens ${hostOf(p.url) || 'your test-mode deploy'} in its own browser, signs up as a new user, buys Pro with Stripe’s test card, cancels, and checks Pro locks again. Stripe’s records decide the result.`),
+        p.blocker ? h('p', { class: 'proof-block' }, p.blocker) : null,
+        steps.length || live ? h('ol', { class: 'proof-steps' },
+          steps.map((s, i) => h('li', { key: `${last.id}:${i}`, class: s.ok ? 'ok' : 'no' },
+            icon(s.ok ? 'checkCircle' : 'x'),
+            h('div', { class: 'grow' }, h('div', { class: 'name' }, s.label || s.name), h('div', { class: 'small' }, s.detail)),
+            s.shot ? h('a', { class: 'shot', href: s.shot, target: '_blank', rel: 'noopener', title: `Open the screenshot: ${s.label}` }, h('img', { src: s.shot, alt: `Screenshot: ${s.label}`, loading: 'lazy' })) : null)),
+          live ? h('li', { key: `${last.id}:next`, class: 'now' }, icon('spinner'), h('div', { class: 'grow' }, h('div', { class: 'name' }, last.status === 'queued' ? 'Waiting for the test browser' : `${PROOF_NEXT[steps.length] || 'Finishing'}…`))) : null) : null,
+        last && !live && last.status === 'error' ? h('p', { class: 'small proof-block' }, last.detail) : null,
+        h('div', { class: 'row' }, h('button', { class: `btn${last?.status === 'passed' ? '' : ' primary'}`, disabled: !!p.blocker || live, onclick: start }, icon('play'), live ? 'Testing…' : last ? 'Run it again' : 'Run the purchase test'))));
+  }
+
   function settingsCard(app) {
     const keys = C.me?.settings || {};
     const save = (k, value) => {
@@ -306,7 +342,7 @@
       h('div', { class: 'card-body' }, Object.entries(keys).map(([k, d]) => h('div', { class: 'set' },
         h('div', {}, h('div', { class: 'k' }, k), h('div', { class: 'd' }, d)),
         h('input', {
-          class: 'in', type: 'text', value: app.config[k] || '', 'aria-label': k, placeholder: k === 'health.path' ? '/api/health' : '',
+          class: 'in', type: 'text', value: app.config[k] || '', 'aria-label': k, placeholder: { 'health.path': '/api/health', 'signup.path': '/signup', 'preview.url': 'https://my-app-git-main.vercel.app' }[k] || '',
           onchange: (e) => save(k, e.currentTarget.value),
           onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } },
         }))),
@@ -843,7 +879,7 @@
       h('button', { class: 'btn', title: 'Fetch the code again and rescan it', onclick: (e) => busy(e.currentTarget, async () => { toast('Rescanning…'); await post(`/api/apps/${app.slug}/rescan`); await refresh(true); toast('Rescanned'); }) }, icon('refresh'), 'Rescan'),
       h('button', { class: 'btn primary', onclick: () => openRun(app.slug, app.cloud?.run && OPEN.has(app.cloud.run.status) ? app.cloud.run.id : null) }, icon('play'), app.cloud?.run && OPEN.has(app.cloud.run.status) ? 'Open run' : 'Run with Claude'),
     ],
-    afterHero: (app) => [runCard(app), scanCard(app)],
+    afterHero: (app) => [runCard(app), scanCard(app), proofCard(app)],
     nextActionButton: (app, a) => (a.skill || a.command ? h('button', { class: 'btn', onclick: () => {
       const ids = app.steps.filter((s) => s.skill === a.skill && !['done', 'skipped'].includes(s.status)).map((s) => s.id);
       openRun(app.slug).then(() => { if (ids.length && !C.run) { C.pick = Object.fromEntries(app.steps.map((s) => [s.id, ids.includes(s.id)])); render(); } });

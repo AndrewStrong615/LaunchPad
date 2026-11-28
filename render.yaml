@@ -1,6 +1,13 @@
-# Render blueprint for Liftoff Cloud (the web app in cloud/).
+# Render blueprint for Liftoff Cloud (the web app in cloud/) and its test
+# browser (proof/), a private service the purchase test runs on.
 # New > Blueprint in the Render dashboard, pick this repo, then fill in the
 # values marked sync: false. See cloud/README.md.
+envVarGroups:
+  # Shared by the web app and the test browser: signs every request between them.
+  - name: liftoff-proof
+    envVars:
+      - key: LIFTOFF_PROOF_SECRET
+        generateValue: true
 services:
   - type: web
     name: liftoff-cloud
@@ -35,3 +42,22 @@ services:
       # Spending cap per run, in US dollars.
       - key: LIFTOFF_RUN_BUDGET_USD
         value: "15"
+      # Liftoff's test browser, over Render's private network.
+      - fromGroup: liftoff-proof
+      - key: LIFTOFF_PROOF_URL
+        fromService:
+          type: pserv
+          name: liftoff-proof
+          property: hostport
+
+  # Runs the purchase test in Chromium, one app at a time. No public address,
+  # no disk, no keys. Keep it in the same region as liftoff-cloud.
+  - type: pserv
+    name: liftoff-proof
+    runtime: docker
+    plan: starter # 512 MB; use standard if tests stop with "out of memory"
+    dockerfilePath: ./proof/Dockerfile
+    dockerContext: .
+    autoDeploy: true
+    envVars:
+      - fromGroup: liftoff-proof
