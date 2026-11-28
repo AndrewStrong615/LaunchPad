@@ -306,7 +306,6 @@
     const total = a.stepsTotal + a.checksTotal;
     return total ? Math.round(((a.stepsDone + a.checksDone) / total) * 100) : 0;
   };
-  const initials = (label) => label.split(/\s|\(/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 
   function obTop() {
     const at = C.ob.step;
@@ -501,7 +500,7 @@
       h('section', { class: 'card ob-panel' },
         h('div', { class: 'card-head' }, h('h2', {}, 'Services for this app'), h('span', { class: 'count' }, `${done}/${list.length}`), h('span', { class: 'end sub' }, 'All optional for now')),
         h('div', { class: 'card-body rows' }, list.length ? list.map((a) => h('div', { class: 'line', key: a.id },
-          h('span', { class: 'tile' }, initials(a.label)),
+          Board.serviceTile(a),
           h('div', { class: 'grow' }, h('div', { class: 'name' }, a.label), h('div', { class: 'small' }, a.connected ? `Connected ${a.connectedAt ? ago(a.connectedAt) : ''}`.trim() : a.note)),
           accountAction(a))) : h('div', { class: 'empty-row' }, icon('checkCircle'), 'This app doesn’t need any service keys.'))),
       h('p', { class: 'ob-note small' }, icon('clock'), `No keys handy? Skip this. ${ai()} asks for one when a step needs it, and they all live under Accounts.`),
@@ -567,6 +566,7 @@
   // ---------- accounts ----------
 
   function keyDialog(a) {
+    const mark = Board.logo(a.id);
     const big = (f) => f === 'APP_STORE_CONNECT_KEY' || f.endsWith('_JSON');
     const dlg = h('dialog', { class: 'modal', 'aria-label': `Connect ${a.label}` });
     // A key that can't be right is said here: a toast would sit behind the dialog.
@@ -588,7 +588,7 @@
         await refresh(true);
       });
     } },
-    h('div', { class: 'modal-head' }, h('span', { class: 'head-tile' }, icon('key')), h('div', {}, h('h2', {}, `Connect ${a.label}`),
+    h('div', { class: 'modal-head' }, mark ? h('span', { class: 'head-tile brand' }, mark) : h('span', { class: 'head-tile' }, icon('key')), h('div', {}, h('h2', {}, `Connect ${a.label}`),
       h('p', { class: 'small' }, `Stored encrypted on the server. ${ai()} never sees the real value: its sandbox gets a placeholder that becomes the key only on the way to `, a.label, '.'))),
     a.fields.map((f) => h('label', { class: 'field' }, h('span', {}, f),
       big(f) ? h('textarea', { name: f, class: 'in', required: true, spellcheck: 'false', placeholder: a.hints?.[f] || '' })
