@@ -146,7 +146,10 @@ export class Watcher {
     clearInterval(this.timer);
     clearTimeout(this.first);
     this.timer = null;
-    await Promise.allSettled([this.ticking, ...this.daily.values()]);
+    // Let checks that are out finish, but don't hold up a shutdown for long:
+    // every write is atomic, and an unfinished daily check runs again next time.
+    const wait = new Promise((r) => setTimeout(r, 5000).unref());
+    await Promise.race([Promise.allSettled([this.ticking, ...this.daily.values()]), wait]);
   }
 
   // ---------- records ----------
