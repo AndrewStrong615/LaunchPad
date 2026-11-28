@@ -12,7 +12,7 @@ import { renderScaffold, SCAFFOLDS } from '../../lib/scaffold.mjs';
 import { applyVerify, purchaseProvenByStripe, runVerify, VERIFIABLE } from '../../lib/verify.mjs';
 import { collectPulse, recordPulse } from '../../lib/pulse.mjs';
 import { walk } from '../../lib/scan.mjs';
-import { ACCOUNT_HOSTS, listUserAccounts, sandboxEnvPlan, userEnv } from './accounts.mjs';
+import { ACCOUNT_HOSTS, listUserAccounts, sandboxEnvPlan, stripeConnected, userEnv } from './accounts.mjs';
 import { githubToken } from './importer.mjs';
 import { ROOT, SKILLS } from './agent.mjs';
 import { HttpError } from './http.mjs';
@@ -23,11 +23,10 @@ const PROVABLE = new Set([...VERIFIABLE, 'sec-keys']);
 // The purchase flow test is proven from Stripe's records for web apps that pay
 // through Stripe. Apps that sell through the stores (or Paddle, Lemon Squeezy)
 // can't be checked that way yet, so Claude still records their test run.
-function isProvable(state, item, stripeConnected) {
-  if (item === 'pay-e2e') return purchaseProvenByStripe(state, { stripeConnected });
+function isProvable(state, item, stripe) {
+  if (item === 'pay-e2e') return purchaseProvenByStripe(state, { stripeConnected: stripe });
   return PROVABLE.has(item);
 }
-const stripeConnected = (ctx, uid) => listUserAccounts(ctx.store, uid).some((a) => a.id === 'stripe' && a.connected);
 
 const POSTHOG_HOSTS = ACCOUNT_HOSTS.posthog;
 const ID_LIKE = /^[\w.-]{1,100}$/;
@@ -194,13 +193,13 @@ const HANDLERS = {
   },
 
   liftoff_checklist(ctx, run) {
-    return checklistView(ctx.store.loadApp(run.uid, run.slug), stripeConnected(ctx, run.uid));
+    return checklistView(ctx.store.loadApp(run.uid, run.slug), stripeConnected(ctx.store, run.uid));
   },
 
   liftoff_check(ctx, run, input) {
     const item = str(input.item, 60);
     const done = input.done !== false;
-    if (done && isProvable(ctx.store.loadApp(run.uid, run.slug), item, stripeConnected(ctx, run.uid))) {
+    if (done && isProvable(ctx.store.loadApp(run.uid, run.slug), item, stripeConnected(ctx.store, run.uid))) {
       if (item === 'pay-e2e') throw new Error('"pay-e2e" is proven from Stripe\'s records, not ticked by hand. Once the test ids are in the app and a preview that uses Stripe test keys is deployed (preview.url), call liftoff_prove_purchase: Liftoff runs the purchase in a real browser and checks Stripe. If the test already ran in CI, liftoff_verify (only: ["pay-e2e"]) looks in Stripe test mode for that paid Checkout and its cancellation.');
       throw new Error(`"${item}" is checked against the real service. Prove it with liftoff_verify (only: ["${item}"]) instead.`);
     }

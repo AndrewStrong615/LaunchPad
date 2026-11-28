@@ -11,8 +11,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { HEADER, signRequest, STEPS } from '../../proof/protocol.mjs';
-import { applyVerify, purchaseProvenByStripe } from '../../lib/verify.mjs';
-import { listUserAccounts, userEnv } from './accounts.mjs';
+import { applyVerify, sellsWithStripe } from '../../lib/verify.mjs';
+import { stripeConnected, userEnv } from './accounts.mjs';
 import { verifyApp } from './tools.mjs';
 import { HttpError } from './http.mjs';
 
@@ -62,12 +62,9 @@ export class ProofRunner {
     }
   }
 
-  // A web app that pays through Stripe: the payments step says so, or the
-  // code uses Stripe, or (before either) Stripe is connected.
+  // A web app that pays through Stripe (sellsWithStripe in lib/verify.mjs).
   applies(uid, state) {
-    const stripe = listUserAccounts(this.ctx.store, uid).some((a) => a.id === 'stripe' && a.connected);
-    if (purchaseProvenByStripe(state, { stripeConnected: stripe })) return true;
-    return (state.platforms || []).includes('web') && !state.steps?.payments?.provider && (state.payments || []).includes('stripe');
+    return sellsWithStripe(state, { stripeConnected: stripeConnected(this.ctx.store, uid) });
   }
 
   // Why a test can't start for this app now, or null.

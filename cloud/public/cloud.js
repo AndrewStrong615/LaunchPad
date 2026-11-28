@@ -498,6 +498,71 @@
         h('div', { class: 'row' }, h('button', { class: `btn${last?.status === 'passed' ? '' : ' primary'}`, disabled: !!p.blocker || live, onclick: start }, icon('play'), live ? 'Testing…' : last ? 'Run it again' : 'Run the purchase test'))));
   }
 
+  // The launch report: a dated public page of what Liftoff proved, and the
+  // badge for the app's site that links to the newest one.
+  const longDay = (iso) => new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+  const badgeCode = (b) => `<a href="${b.url}"><img src="${b.image}" alt="Liftoff launch report" height="20"></a>`;
+  async function copyText(text, done) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(done);
+    } catch {
+      toast('Select the code in the box and copy it.');
+    }
+  }
+
+  function reportCard(app) {
+    const r = app.cloud?.report;
+    if (!r) return null;
+    const { now, latest, badge } = r;
+    const c = now.counts;
+    const create = (e) => busy(e.currentTarget, async () => {
+      toast('Running every check again for the report…');
+      await post(`/api/apps/${app.slug}/report`);
+      await refresh(true);
+      const made = appOf(app.slug)?.cloud?.report?.latest;
+      toast(made?.certified ? 'Launch certified. The report and your badge are updated.' : 'Report made. It lists what’s left to prove.');
+    });
+    const takeDown = (id) => (e) => busy(e.currentTarget, async () => {
+      if (!confirm('Take this report down? Its link stops working.')) return;
+      await api(`/api/apps/${app.slug}/report/${id}`, { method: 'DELETE' });
+      toast('Report taken down');
+      await refresh(true);
+    });
+    const missing = now.missing.slice(0, 6);
+    return h('section', { class: 'card report' },
+      h('div', { class: 'card-head' }, icon('flag'), h('h2', {}, 'Launch report'),
+        h('span', { class: `pill sm${now.certified ? ' good' : ''}` }, !now.certified ? 'Not certified yet' : latest?.certified ? 'Certified' : 'Ready to certify'),
+        h('span', { class: 'end sub' }, latest ? `Last report ${ago(latest.at)}` : 'No report yet')),
+      h('div', { class: 'card-body' },
+        h('p', { class: 'small report-what' }, 'A dated page anyone with the link can open: every check, the evidence and a score. It says “Launch certified” only when every required check ran on Liftoff’s server and passed.'),
+        h('div', { class: 'report-score' },
+          h('div', { class: 'num' }, String(now.score), h('span', {}, '/100')),
+          h('div', { class: 'small' }, [`${c.proven} proven by Liftoff`, c.reported ? `${c.reported} marked done by hand` : null, c.failed ? `${c.failed} failing` : null, `${c.unproven + c.open} to go`].filter(Boolean).join(' · '))),
+        !now.certified && missing.length ? h('ul', { class: 'report-missing' },
+          missing.map((m) => h('li', { key: m }, icon('circle'), h('span', {}, m))),
+          now.missing.length > missing.length ? h('li', { key: 'more', class: 'more' }, h('span', {}, `and ${now.missing.length - missing.length} more`)) : null) : null,
+        h('div', { class: 'row' },
+          h('button', { class: `btn${now.certified || !latest ? ' primary' : ''}`, onclick: create }, icon('flag'), latest ? 'Make a new report' : 'Make the report'),
+          latest ? h('a', { class: 'btn', href: latest.url, target: '_blank', rel: 'noopener' }, 'Open the report', icon('external')) : null),
+        badge ? h('div', { class: 'report-badge' },
+          h('div', { class: 'k' }, 'Badge for your site'),
+          h('div', { class: 'small' }, latest?.certified ? `Shows “launch certified” with the date of the newest report, and links to it.` : 'Shows “launch report” until a report is certified, then the date. It links to the newest report.'),
+          h('div', { class: 'row' },
+            h('img', { class: 'badge-img', src: `${new URL(badge.image).pathname}?v=${latest?.id || 'none'}`, alt: 'Your Liftoff badge', height: '20' }),
+            h('span', { class: 'small grow' }, `${badge.clicks} ${badge.clicks === 1 ? 'visit' : 'visits'} from the badge`)),
+          h('div', { class: 'row' },
+            h('input', { class: 'in mono grow', type: 'text', readonly: true, value: badgeCode(badge), 'aria-label': 'Badge code', onfocus: (e) => e.currentTarget.select() }),
+            h('button', { class: 'btn', onclick: () => copyText(badgeCode(badge), 'Copied the badge code. Paste it into your site’s footer.') }, icon('copy'), 'Copy'))) : null,
+        r.history.length > 1 ? h('details', { class: 'report-history' },
+          h('summary', {}, `Earlier reports (${r.history.length - 1})`),
+          h('ul', {}, r.history.slice(1).map((x) => h('li', { key: x.id },
+            h('span', { class: `pill sm${x.certified ? ' good' : ''}` }, x.certified ? 'Certified' : 'Not certified'),
+            h('a', { class: 'grow', href: x.url, target: '_blank', rel: 'noopener' }, `${longDay(x.at)} · score ${x.score}`),
+            h('button', { class: 'btn sm ghost', title: 'Take this report down', 'aria-label': 'Take this report down', onclick: takeDown(x.id) }, icon('trash')))))) : null,
+        latest ? h('p', { class: 'small report-down' }, h('button', { class: 'link', onclick: takeDown(latest.id) }, 'Take the newest report down')) : null));
+  }
+
   function settingsCard(app) {
     const keys = C.me?.settings || {};
     const save = (k, value) => {
@@ -1063,7 +1128,7 @@
       h('button', { class: 'btn', title: 'Fetch the code again and rescan it', onclick: (e) => busy(e.currentTarget, async () => { toast('Rescanning…'); await post(`/api/apps/${app.slug}/rescan`); await refresh(true); toast('Rescanned'); }) }, icon('refresh'), 'Rescan'),
       h('button', { class: 'btn primary', onclick: () => openRun(app.slug, app.cloud?.run && OPEN.has(app.cloud.run.status) ? app.cloud.run.id : null) }, icon('play'), app.cloud?.run && OPEN.has(app.cloud.run.status) ? 'Open run' : 'Run with Claude'),
     ],
-    afterHero: (app) => [runCard(app), scanCard(app), proofCard(app)],
+    afterHero: (app) => [runCard(app), scanCard(app), proofCard(app), reportCard(app)],
     nextActionButton: (app, a) => (a.skill || a.command ? h('button', { class: 'btn', onclick: () => {
       const ids = app.steps.filter((s) => s.skill === a.skill && !['done', 'skipped'].includes(s.status)).map((s) => s.id);
       openRun(app.slug).then(() => { if (ids.length && !C.run) { C.pick = Object.fromEntries(app.steps.map((s) => [s.id, ids.includes(s.id)])); render(); } });

@@ -5,8 +5,10 @@
 //   users/<uid>/apps/<slug>/state.json the same state the plugin keeps in .liftoff/state.json
 //   users/<uid>/apps/<slug>/source/    the imported code, scanned by verify and the pre-scan
 //   users/<uid>/apps/<slug>/runs/<id>.json  cloud runs with Claude
+//   users/<uid>/apps/<slug>/reports/<id>/   launch reports and their evidence
 //   sessions/<sid>.json                sign-in sessions (each names its user)
 //   github/<id>.json                   GitHub user id -> uid
+//   public/<id>.json                   a shared report or badge link -> { uid, slug }
 //
 // Writes are atomic (temp file + rename). Everything is read and written
 // synchronously, so a read-modify-write never interleaves with another request.
@@ -17,6 +19,8 @@ import { decrypt, encrypt, randomId } from './crypto.mjs';
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const UID = /^u_[a-z0-9]{6,32}$/;
+// Shared links: rp_ for one launch report, bd_ for an app's badge.
+export const PUBLIC_ID = /^(rp|bd)_[A-Za-z0-9_-]{20}$/;
 const RUN = /^r_[a-z0-9]{6,32}$/;
 const SID = /^[A-Za-z0-9_-]{40,64}$/;
 const SESSION_DAYS = 30;
@@ -195,6 +199,35 @@ export class Store {
 
   deleteApp(uid, slug) {
     fs.rmSync(this.appDir(uid, slug), { recursive: true, force: true });
+  }
+
+  // ---------- shared links ----------
+  // A shared link only points at an app; what it shows lives with the app, so
+  // deleting the app or the account takes it down. Dangling links are removed
+  // when someone opens them.
+
+  newPublicId(prefix) {
+    return `${prefix}_${crypto.randomBytes(15).toString('base64url')}`;
+  }
+
+  publish(id, ref) {
+    if (!PUBLIC_ID.test(id)) throw new Error('Bad link id');
+    writeJson(path.join(this.dir, 'public', `${id}.json`), { uid: ref.uid, slug: ref.slug });
+  }
+
+  published(id) {
+    if (typeof id !== 'string' || !PUBLIC_ID.test(id)) return null;
+    const ref = readJson(path.join(this.dir, 'public', `${id}.json`));
+    if (!ref || !UID.test(ref.uid || '') || !isSlug(ref.slug)) return null;
+    if (!fs.existsSync(path.join(this.appDir(ref.uid, ref.slug), 'state.json'))) {
+      this.unpublish(id);
+      return null;
+    }
+    return ref;
+  }
+
+  unpublish(id) {
+    if (PUBLIC_ID.test(id)) fs.rmSync(path.join(this.dir, 'public', `${id}.json`), { force: true });
   }
 
   // ---------- runs ----------

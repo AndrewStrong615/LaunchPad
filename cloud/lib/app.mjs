@@ -17,6 +17,7 @@ import { pulseApp, validateSetting, verifyApp } from './tools.mjs';
 import { LIVE, publicRun } from './runs.mjs';
 import { MODELS } from './agent.mjs';
 import { isRunId, isSlug } from './store.mjs';
+import { badgeSvg, countClick, createReport, deleteReport, latestReport, loadReport, renderMissing, renderReport, reportShot, reportView } from './report.mjs';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const PAGES = {
@@ -24,7 +25,12 @@ const PAGES = {
   '/cloud.js': ['cloud.js', 'text/javascript; charset=utf-8'],
   '/login.js': ['login.js', 'text/javascript; charset=utf-8'],
   '/favicon.svg': ['favicon.svg', 'image/svg+xml'],
+  '/report.css': ['report.css', 'text/css; charset=utf-8'],
 };
+// Launch reports and badges are public: anyone with the link can open them.
+const REPORT_PATH = /^\/r\/(rp_[A-Za-z0-9_-]{20})(?:\/(\d{2}-[a-z-]{1,20}\.jpg))?$/;
+const BADGE_PATH = /^\/b\/(bd_[A-Za-z0-9_-]{20})(\.svg)?$/;
+const BOT = /bot|crawl|spider|slurp|preview|facebookexternalhit|embed|fetch|curl|wget|python|node|go-http/i;
 const SID_COOKIE = 'lc_sid';
 const STATE_COOKIE = 'lc_oauth';
 const THEMES = ['system', 'light', 'dark'];
@@ -79,6 +85,7 @@ export function createApp(ctx) {
         run: latest ? { id: latest.id, status: latest.status, pending: latest.pending.length, cost: latest.cost, pr: latest.pr || null, createdAt: latest.createdAt } : null,
         runs: all.length,
         proof: ctx.proof.view(uid, state),
+        report: reportView(ctx, uid, state),
       },
     };
   }
@@ -327,6 +334,16 @@ export function createApp(ctx) {
           return res.end(body);
         }
       }
+      if (rest[0] === 'report') {
+        // A launch report (lib/report.mjs): make one after a fresh verify, or take one down.
+        if (rest.length === 1 && M === 'POST') {
+          limit(`report:${uid}`, 10, 3600000);
+          limit(`verify:${uid}`, 20, 60000);
+          await createReport(ctx, uid, slug);
+          return ok(view(uid, store.loadApp(uid, slug)));
+        }
+        if (rest.length === 2 && M === 'DELETE') return ok(view(uid, deleteReport(ctx, uid, slug, rest[1])));
+      }
       if (rest[0] === 'tasks') {
         if (M === 'POST' && rest.length === 1) {
           const body = await readJson(req);
@@ -386,6 +403,47 @@ export function createApp(ctx) {
     throw new HttpError(404, 'Not found');
   }
 
+  // ---------- shared reports and badges ----------
+
+  // Who is asking, for counting badge clicks. Render's proxy adds the
+  // caller's address last; anything before it came from the caller.
+  const clientOf = (req) => String(req.headers['x-forwarded-for'] || '').split(',').pop().trim() || req.socket.remoteAddress || 'ip';
+  const PUBLIC_CACHE = { 'cache-control': 'public, max-age=300', 'x-robots-tag': 'noindex' };
+
+  function shared(req, res, url) {
+    let m;
+    if ((m = REPORT_PATH.exec(url.pathname))) {
+      const ref = store.published(m[1]);
+      const gone = () => send(res, 404, renderMissing(), 'text/html; charset=utf-8', { 'x-robots-tag': 'noindex' });
+      if (!ref) return gone();
+      if (m[2]) {
+        const body = reportShot(ctx, ref.uid, ref.slug, m[1], m[2]);
+        if (!body) throw new HttpError(404, 'Not found');
+        res.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': body.length, 'x-content-type-options': 'nosniff', ...PUBLIC_CACHE });
+        return res.end(body);
+      }
+      const report = loadReport(ctx, ref.uid, ref.slug, m[1]);
+      if (!report) return gone();
+      return send(res, 200, renderReport(report), 'text/html; charset=utf-8', PUBLIC_CACHE);
+    }
+    if ((m = BADGE_PATH.exec(url.pathname))) {
+      const ref = store.published(m[1]);
+      const state = ref && store.loadApp(ref.uid, ref.slug);
+      if (!state || state.report?.badgeId !== m[1]) throw new HttpError(404, 'Not found');
+      const latest = latestReport(state);
+      if (m[2]) return send(res, 200, badgeSvg(latest), 'image/svg+xml; charset=utf-8', { ...PUBLIC_CACHE, 'cross-origin-resource-policy': 'cross-origin' });
+      // A click from the app's site: count each visitor once every 10 minutes, not crawlers.
+      try {
+        if (BOT.test(String(req.headers['user-agent'] || ''))) throw new Error('bot');
+        limit(`click:${m[1]}:${clientOf(req)}`, 1, 600000);
+        limit(`clicks:${m[1]}`, 500, 3600000);
+        countClick(ctx, ref.uid, ref.slug);
+      } catch {}
+      return redirect(res, latest ? `/r/${latest.id}` : '/');
+    }
+    return null;
+  }
+
   // ---------- the handler ----------
 
   return async function handle(req, res) {
@@ -413,6 +471,9 @@ export function createApp(ctx) {
           return page(res, 'login.html');
         }
         if (url.pathname === '/login/options') return send(res, 200, { github: github.oauthEnabled, dev: config.devLogin });
+        if (url.pathname.startsWith('/r/') || url.pathname.startsWith('/b/')) {
+          if (shared(req, res, url) !== null) return;
+        }
         if (url.pathname === '/' || url.pathname === '/index.html') {
           if (!signedIn(req)) return redirect(res, '/login');
           return page(res, 'index.html');

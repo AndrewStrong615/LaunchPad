@@ -18,6 +18,7 @@ It lives next to the plugin and reuses it: the same detection, launch steps, rea
 - **Account settings** (your picture in the sidebar): profile from GitHub, Light, Dark or Match device (saved to the account and in the browser, so the page never flashes the wrong theme; the sun and moon button in the top bar switches it too), the model your runs start on, connections, signing out here or on every other device, and deleting the account. Deleting removes the apps, imported code, run history and keys, deletes the person's Anthropic vault, and takes back Liftoff Cloud's GitHub access. It waits until no run is going.
 - **Verify and Pulse** run on the server against the live site and the connected services, through a fetch that refuses private and internal addresses.
 - **Liftoff runs the purchase test itself** for web apps on Stripe: its own browser signs up on the app's test-mode preview, buys Pro with Stripe's test card, checks Pro unlocks, cancels, and checks Pro locks again, with a screenshot of each step. Stripe's records for that checkout decide the result (see [The purchase test](#the-purchase-test)).
+- **Launch reports and the "Launch certified" badge**: a dated page anyone with the link can open, with every check, the evidence and a score, and a badge for the app's own site that links to it. It says "Launch certified" only when every required check ran on Liftoff's server and passed (see [Launch reports](#launch-reports-and-the-badge)).
 - **Cloud runs with Claude.** Pick steps (or all that are left), pick a model, add a note, start. Claude works in its own sandbox with a copy of the code and follows the plugin's skills. The run page shows what it's doing live; questions and approval requests appear as cards. GitHub apps get a branch and a draft pull request. Zips get a patch and an updated zip to download.
 
 ## How a run works
@@ -49,6 +50,18 @@ The Flight Board shows each step as it happens, then the result with a screensho
 
 The test browser is isolated on purpose, because it opens sites Liftoff doesn't control: its own small server with no disk, no public address and no keys. Every request the cloud sends it is signed with `LIFTOFF_PROOF_SECRET` (a timestamp, a one-time nonce and an HMAC over the method, path and body), and the cloud trusts only Stripe's records, not the browser's report, so even a compromised browser can't tick anything. All of Chromium's traffic goes through a proxy that allows only ports 80 and 443 on public addresses (checked on the address it connects to), so a page can't reach Render's private network, cloud metadata or anything local.
 
+## Launch reports and the badge
+
+*Make the report* on the Flight Board runs every check again, then saves a snapshot of the app at `/r/<id>`, a link anyone can open without signing in.
+
+- **Certified** when the app is a web app and every required check was proven by Liftoff (ticked by `verify` or the scan, not by hand) in the last 30 days. Required: the live deploy answers, HTTPS with http and www redirecting, `/privacy` and `/terms` load, no secret keys in the shipped code; for apps that sell through Stripe, the webhook rejects unsigned requests and the purchase test (or the app's CI) left a paid, cancelled checkout in Stripe; for Supabase apps, row-level security is on. A skipped check never counts as a pass. Other checks don't block, so a test-mode Stripe key (which `pay-live` fails) doesn't stop a certificate.
+- **On the page**: what each proven check found and when, Liftoff's latest purchase test with its screenshots, then what didn't pass, what isn't proven yet, what was marked done by hand, and what's still open. Why a check failed is never shown (it could point at a weakness, like a leaked key's file or a table without RLS); the owner sees that on the Flight Board. Skip reasons stay private too.
+- **Score**: proven items count fully, hand-ticked items half, out of every checklist item.
+- **The badge**: `/b/<id>.svg` shows the newest report, "launch certified" with its date or a plain "launch report" that claims nothing, and `/b/<id>` sends visitors to that report. Visits are counted once per visitor every 10 minutes, without crawlers. The card has the code to paste into the site.
+- **Taking a report down** stops its link; the badge falls back to the report before it. The last 20 reports are kept. Removing the app or the account takes every link down.
+
+Report pages, screenshots and badges are served with a 5 minute public cache and `noindex`. Shared links are random ids (`rp_…`, `bd_…`) kept in `<data>/public/`, each pointing at the app that owns it; the content lives with the app in `apps/<slug>/reports/`.
+
 ## Run it locally
 
 ```
@@ -61,7 +74,7 @@ Open `http://localhost:8787` (not 127.0.0.1: the address must match `PUBLIC_URL`
 
 ```
 ANTHROPIC_API_KEY=sk-ant-... npm run dev      # cloud runs too
-npm test                                      # 26 tests, no network needed
+npm test                                      # 34 tests, no network needed
 ```
 
 ## Deploy on Render
@@ -120,6 +133,7 @@ cloud/
     github.mjs        OAuth, repos, tarballs, pull requests, Actions secrets
     safe-fetch.mjs    fetch that refuses private addresses (verify, Pulse)
     proof.mjs         the purchase test: queue, Stripe cancel, screenshots, result
+    report.mjs        launch reports: certification, the public page, the badge
     store.mjs         file storage
     crypto.mjs, http.mjs, config.mjs
   public/             the web app's pages (the Flight Board itself is ../dashboard)
